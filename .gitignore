@@ -1,0 +1,31 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# data
+data/raw/*
+data/processed/*
+!data/**/.gitkeep
+
+# notebooks
+.ipynb_checkpoints/
+
+# secrets
+.env
+.pgpass
+
+# Licensed data must never be published (WRDS/CRSP/Compustat/OptionMetrics terms)
+*.parquet
+*.csv
+*.csv.gz
+*.h5
+*.dta
+*.sas7bdat
+*.duckdb
