@@ -5,17 +5,20 @@ from dispersion.correlation import (
     index_variance,
     index_vol_from_average_correlation,
 )
-from dispersion.realized import (
-    average_correlation_panel,
-    basket_return,
-    realized_vol,
+from dispersion.history import (
+    correlation_window,
+    implied_correlation_on,
+    realized_correlation_history,
 )
+from dispersion.realized import annualized_vol, basket_return
 
 __all__ = [
+    "annualized_vol",
     "average_correlation",
-    "average_correlation_panel",
     "basket_return",
+    "correlation_window",
+    "implied_correlation_on",
     "index_variance",
     "index_vol_from_average_correlation",
-    "realized_vol",
+    "realized_correlation_history",
 ]

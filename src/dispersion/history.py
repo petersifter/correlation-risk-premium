@@ -75,7 +75,6 @@ from __future__ import annotations
 import warnings
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from dispersion.correlation import average_correlation
@@ -90,22 +89,13 @@ from dispersion.data import (
     formation_weights,
     members_on,
 )
-from dispersion.realized import TRADING_DAYS_PER_YEAR
+from dispersion.realized import TRADING_DAYS_PER_YEAR, annualized_vol, basket_return
 
 __all__ = [
     "correlation_window",
     "implied_correlation_on",
     "realized_correlation_history",
 ]
-
-
-def _annualised_vol(returns: pd.DataFrame | pd.Series, trading_days: int) -> Any:
-    """Non-demeaned realised volatility over the whole of ``returns``.
-
-    ``sqrt(mean(r^2) * trading_days)``. See ``realized.py`` on why the mean is not removed: the
-    short version is that implied volatility is a pure second moment, and rung 4 compares the two.
-    """
-    return np.sqrt((returns**2).mean() * trading_days)
 
 
 def correlation_window(
@@ -136,10 +126,11 @@ def correlation_window(
         )
     if not index_window_returns.index.equals(window_returns.index):
         raise ValueError("index and constituent windows must cover exactly the same dates")
-    # The constituent side is protected by the `usable` filter below, which keeps only columns with
-    # no NaN. The index side has no such filter, and `_annualised_vol` uses `.mean()`, which skips
-    # NaN silently - so a single hole here would annualise the index over fewer observations than
-    # the constituents and bias the correlation with no error raised. Check it explicitly.
+    # The constituent side is protected by the `usable` filter below, which keeps only columns
+    # with no NaN. The index side has no such filter, and `mean()` skips NaN silently - so a single
+    # hole here would annualise the index over fewer observations than the constituents and bias
+    # the correlation with no error raised. Check it explicitly, with a message that says which
+    # side is at fault.
     if index_window_returns.isna().any():
         n_missing = int(index_window_returns.isna().sum())
         raise ValueError(
@@ -161,12 +152,13 @@ def correlation_window(
     renormalised = weights[usable] / weights[usable].sum()
     component_returns = candidates[usable]
 
-    component_vols = _annualised_vol(component_returns, trading_days)
+    component_vols = annualized_vol(component_returns, trading_days=trading_days)
     weighted_avg_vol = float(renormalised @ component_vols)
 
-    index_vol = float(_annualised_vol(index_window_returns, trading_days))
-    basket_returns = (component_returns * renormalised).sum(axis=1)
-    basket_vol = float(_annualised_vol(basket_returns, trading_days))
+    index_vol = float(annualized_vol(index_window_returns, trading_days=trading_days))
+    basket_vol = float(
+        annualized_vol(basket_return(component_returns, renormalised), trading_days=trading_days)
+    )
 
     vols = component_vols.to_numpy()
     w = renormalised.to_numpy()
