@@ -5,9 +5,12 @@ from dispersion.correlation import (
     index_variance,
     index_vol_from_average_correlation,
 )
+from dispersion.realized import annualized_vol, basket_return
 
 __all__ = [
+    "annualized_vol",
     "average_correlation",
+    "basket_return",
     "index_variance",
     "index_vol_from_average_correlation",
 ]
