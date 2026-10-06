@@ -24,7 +24,7 @@ GRID = "#e5e4e0"
 SERIES_1 = "#2a78d6"
 SERIES_2 = "#eb6834"
 
-__all__ = ["plot_realized_correlation"]
+__all__ = ["plot_correlation_premium", "plot_realized_correlation"]
 
 
 def _separated_peaks(series: pd.Series, count: int, min_years: int = 3) -> pd.Series:
@@ -175,6 +175,111 @@ def plot_realized_correlation(
         f"21 trading days forward. {len(history)} windows, "
         f"{history.index[0]:%b %Y} to {history.index[-1]:%b %Y}. "
         "The shaded gap is the diversification benefit; it closes as correlation rises.",
+        color=TEXT_SECONDARY,
+        fontsize=8.5,
+    )
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=160, facecolor=SURFACE, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def plot_correlation_premium(history: pd.DataFrame, path: str | Path) -> Path:
+    """Implied against realised correlation, and the gap between them.
+
+    Colour carries one meaning throughout: blue is what the options market *charged*, orange is
+    what the stocks *delivered*. The lower panel inherits that - the premium is implied minus
+    realised, so blue above zero means the charge exceeded the outcome and the seller of
+    correlation won, orange below zero means the reverse. The same hue never changes meaning
+    between panels.
+    """
+    both = history.dropna(subset=["implied_correlation"])
+    premium = both["implied_correlation"] - both["realized_correlation"]
+
+    fig, (top, bottom) = plt.subplots(
+        2, 1, figsize=(11, 7), sharex=True, height_ratios=[3, 2], gridspec_kw={"hspace": 0.12}
+    )
+    fig.patch.set_facecolor(SURFACE)
+
+    top.plot(
+        both.index,
+        both["implied_correlation"],
+        color=SERIES_1,
+        linewidth=1.5,
+        label="implied correlation (what the market charged)",
+        zorder=3,
+    )
+    top.plot(
+        both.index,
+        both["realized_correlation"],
+        color=SERIES_2,
+        linewidth=1.5,
+        alpha=0.85,
+        label="realised correlation (what the stocks delivered)",
+        zorder=3,
+    )
+    top.set_ylim(-0.1, 1.02)
+    top.set_ylabel("average correlation", color=TEXT_SECONDARY, fontsize=10)
+    top.set_title(
+        "The correlation risk premium: implied versus subsequently realised",
+        color=TEXT_PRIMARY,
+        fontsize=13,
+        loc="left",
+        pad=14,
+    )
+    top.legend(loc="upper left", frameon=False, fontsize=9, labelcolor=TEXT_SECONDARY)
+    _recede(top)
+
+    bottom.axhline(0.0, color=TEXT_SECONDARY, linewidth=1.0, zorder=2)
+    bottom.fill_between(
+        premium.index, premium, 0, where=premium >= 0, color=SERIES_1, alpha=0.55, linewidth=0
+    )
+    bottom.fill_between(
+        premium.index, premium, 0, where=premium < 0, color=SERIES_2, alpha=0.65, linewidth=0
+    )
+    bottom.axhline(
+        float(premium.mean()),
+        color=TEXT_PRIMARY,
+        linewidth=1.0,
+        linestyle=(0, (4, 3)),
+        zorder=4,
+    )
+    bottom.annotate(
+        f"mean +{premium.mean():.3f}",
+        xy=(premium.index[-1], premium.mean()),
+        xytext=(-4, 5),
+        textcoords="offset points",
+        ha="right",
+        color=TEXT_PRIMARY,
+        fontsize=9,
+        bbox={"facecolor": SURFACE, "edgecolor": "none", "pad": 1.5, "alpha": 0.85},
+    )
+
+    worst = premium.idxmin()
+    bottom.annotate(
+        f"{worst:%b %Y}  {premium.loc[worst]:.2f}",
+        xy=(worst, premium.loc[worst]),
+        xytext=(7, 2),
+        textcoords="offset points",
+        color=TEXT_PRIMARY,
+        fontsize=9,
+        bbox={"facecolor": SURFACE, "edgecolor": "none", "pad": 1.5, "alpha": 0.85},
+    )
+
+    # A real MINUS SIGN, not a hyphen: this is rendered chart text, where it is the correct
+    # glyph rather than an ASCII lookalike.
+    bottom.set_ylabel("implied − realised", color=TEXT_SECONDARY, fontsize=10)  # noqa: RUF001
+    _recede(bottom)
+
+    fig.text(
+        0.125,
+        0.035,
+        f"{len(both)} monthly windows, {both.index[0]:%b %Y} to {both.index[-1]:%b %Y}. "
+        "Implied is the 30-day 50-delta surface on the formation date; realised is the following "
+        "21 trading days. Both legs use the identical top-50 basket and weights, so the proxy "
+        "approximation largely cancels between them.",
         color=TEXT_SECONDARY,
         fontsize=8.5,
     )

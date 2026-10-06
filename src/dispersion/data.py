@@ -62,8 +62,10 @@ __all__ = [
     "REQUIRED_TABLES",
     "InsufficientData",
     "connect",
+    "fetch_atm_implied_vols",
     "fetch_index_membership",
     "fetch_index_returns",
+    "fetch_optionmetrics_link",
     "fetch_stock_panel",
     "formation_weights",
     "members_on",
@@ -86,10 +88,14 @@ class InsufficientData(ValueError):
     """
 
 
+SPX_SECID = 108105
+"""OptionMetrics security id for the S&P 500 index, confirmed from ``optionm.secnmd``."""
+
 REQUIRED_TABLES: dict[str, tuple[str, ...]] = {
     "crsp.dsp500list": ("permno", "start", "ending"),
     "crsp.dsf": ("date", "permno", "ret", "retx", "prc", "shrout"),
     "crsp.dsi": ("date", "sprtrn", "vwretd"),
+    "wrdsapps_link_crsp_optionm.opcrsphist": ("secid", "permno", "sdate", "edate", "score"),
 }
 
 
@@ -281,3 +287,86 @@ def formation_weights(
         )
 
     return caps / caps.sum(), dropped
+
+
+def fetch_optionmetrics_link(db: Any, permnos: list[int], as_of: str) -> pd.Series:
+    """Map CRSP permnos to OptionMetrics secids, as of ``as_of``.
+
+    Returns a Series indexed by permno. Only ``score = 1`` links are used - WRDS's best match
+    quality. Checked across 1996, 2000, 2005, 2010, 2015, 2020 and 2023: score 1 covers all 50
+    names of the top-50 basket at every one of those dates, so the stricter threshold costs no
+    coverage and avoids admitting dubious matches. A looser threshold would need its own
+    justification rather than being the default.
+
+    The link table is date-ranged because both identifiers are reused over time, so an undated
+    join would attach the wrong company's options to a permno after a reassignment.
+    """
+    link = query(
+        db,
+        """
+        SELECT permno, secid
+        FROM wrdsapps_link_crsp_optionm.opcrsphist
+        WHERE sdate <= %(as_of)s AND edate >= %(as_of)s
+          AND score = 1
+          AND permno IN %(permnos)s
+        """,
+        params={"as_of": as_of, "permnos": tuple(int(p) for p in permnos)},
+    )
+    if link.empty:
+        return pd.Series(dtype="int64", name="secid")
+    return link.drop_duplicates("permno").set_index("permno")["secid"].astype("int64")
+
+
+def fetch_atm_implied_vols(
+    db: Any,
+    secids: list[int],
+    as_of: str,
+    *,
+    days: int = 30,
+) -> pd.DataFrame:
+    """At-the-money implied volatilities from OptionMetrics' standardised surface.
+
+    OptionMetrics publishes implied volatility already interpolated onto fixed maturities (10, 30,
+    60, 91, ... calendar days) and fixed deltas (+/-10 to +/-90 in steps of 5), which removes any
+    need to fit a surface ourselves.
+
+    ``days=30`` is the default because it pairs with the 21-trading-day realised window: 21 trading
+    days is about 30 calendar days, so the implied and realised measurements cover the same horizon.
+    Mismatching them would compare a one-month forecast against a two-week outcome.
+
+    Returns one row per secid with the 50-delta call volatility, the -50-delta put volatility, and
+    their mean in ``atm_vol``. At exactly 50 delta the call and the put sit at slightly different
+    strikes, so the gap between them is the local skew rather than noise, and it widens sharply in
+    stress - about 0.8 volatility points across the basket on 2019-11-29 against 8.0 points on
+    2020-02-28. ``atm_vol`` averages them, which approximates the forward at-the-money volatility;
+    the two legs are returned alongside so the choice can be tested rather than trusted.
+
+    The surface tables are partitioned by year, so this queries one year at a time by design.
+    """
+    year = pd.Timestamp(as_of).year
+    surface = query(
+        db,
+        f"""
+        SELECT secid, cp_flag, impl_volatility
+        FROM optionm.vsurfd{year}
+        WHERE date = %(as_of)s
+          AND days = %(days)s
+          AND ABS(delta) = 50
+          AND secid IN %(secids)s
+        """,
+        params={"as_of": as_of, "days": days, "secids": tuple(int(s) for s in secids)},
+    )
+    if surface.empty:
+        return pd.DataFrame(columns=["call_vol", "put_vol", "atm_vol"], dtype=float)
+
+    # pivot_table rather than pivot here: averaging is the intended behaviour for the rare
+    # duplicate surface row, unlike history.py where a duplicate signals a data defect.
+    wide = surface.pivot_table(
+        index="secid", columns="cp_flag", values="impl_volatility", aggfunc="mean"
+    ).rename(columns={"C": "call_vol", "P": "put_vol"})
+    for leg in ("call_vol", "put_vol"):
+        if leg not in wide.columns:
+            wide[leg] = float("nan")
+    wide["atm_vol"] = wide[["call_vol", "put_vol"]].mean(axis=1)
+    wide.index = wide.index.astype("int64")
+    return wide[["call_vol", "put_vol", "atm_vol"]]

@@ -9,7 +9,8 @@ This repository measures that price, asks whether it is systematically too high,
 position that harvests it, and then examines what happens in the periods where the trade
 famously breaks.
 
-> **Status:** under construction. Rungs 1 and 2 complete and verified against CRSP.
+> **Status:** under construction. Rungs 1-3 complete; rung 4's headline measured, its
+> inference outstanding.
 
 ## The build order
 
@@ -19,8 +20,8 @@ Each rung is completed, tested and committed before the next begins.
 | --- | --- | --- |
 | 1 | The variance identity, solved for average correlation | ✅ |
 | 2 | Realised correlation from CRSP returns | ✅ |
-| 3 | Implied correlation from the OptionMetrics surface | |
-| 4 | The premium: implied versus subsequently realised | |
+| 3 | Implied correlation from the OptionMetrics surface | ✅ |
+| 4 | The premium: implied versus subsequently realised | measured, inference next |
 | 5 | The position: vega-weighted straddles, delta hedging, costs | |
 | 6 | The tail: February 2018, March 2020 | |
 
@@ -126,6 +127,73 @@ numerically at rung 3 against published COR1M values.
 
 **Coverage is complete.** 419 windows for 419 available month-ends; zero skipped. Only 17 windows
 lost any constituent at all, never more than two.
+
+## Rung 3 — what the market charged
+
+![The correlation risk premium](reports/correlation_premium.png)
+
+Implied correlation comes from OptionMetrics' standardised volatility surface at **30 calendar
+days, 50 delta** — Cboe's at-the-money convention, and a tenor chosen to match the realised
+window, since 21 trading days is about 30 calendar days. Comparing a one-month forecast against a
+two-week outcome would be a horizon mismatch, the same class of error as mixing price and total
+returns at rung 2.
+
+Both legs are priced off the **identical basket**: the same top-50 names, the same market-cap
+weights, the same formation date. Only the volatilities differ. That matters, because it means the
+top-50 proxy approximation largely cancels between the two sides instead of sitting between them as
+an unmeasured wedge.
+
+Constituents are mapped to OptionMetrics by the WRDS link table at `score = 1` only. Checked at
+seven dates spanning 1996–2023: that threshold covers all 50 basket names every time, so the strict
+setting costs no coverage.
+
+| | |
+| --- | --- |
+| windows with both legs | 346 (Jan 1996 – Nov 2024) |
+| mean implied correlation | 0.418 |
+| mean realised correlation | 0.346 |
+| **mean premium** | **+0.072** |
+| premium positive in | **72.3%** of windows |
+
+**The market charges more for correlation than correlation turns out to be**, by about 7
+correlation points on average, in roughly three windows out of four. That is the premium a
+dispersion seller is harvesting.
+
+**And it has decayed sharply.**
+
+| decade | windows | implied | realised | premium | % positive |
+| --- | --- | --- | --- | --- | --- |
+| 1990s | 48 | 0.414 | 0.245 | **+0.169** | 92% |
+| 2000s | 120 | 0.426 | 0.369 | +0.057 | 75% |
+| 2010s | 120 | 0.454 | 0.385 | +0.069 | 68% |
+| 2020s | 58 | 0.332 | 0.305 | +0.027 | 60% |
+
+The edge was large and nearly automatic in the late 1990s and is a quarter of that size today, with
+the hit rate falling from 92% to 60%. Any claim that this is a tradeable strategy today has to
+contend with that, and the honest reading is that it has been substantially arbitraged away.
+
+**The losses are concentrated and brutal.** The worst window was formed 2018-01-31 — the window
+containing 5 February 2018, "Volmageddon". Implied correlation was 0.183; realised came in at
+0.560. The market charged almost nothing for correlation and then got more than triple. The next
+four worst are August 2015, the June 2016 Brexit vote, the May 2010 flash crash, and October 2018.
+A short-correlation book earns small and steady and loses large and sudden, which is the shape the
+decade table is averaging over.
+
+### Not yet claimed
+
+The premium above is a mean difference, not an established risk premium. Rung 4 still owes:
+inference that accounts for autocorrelation in correlation itself (a naive t-statistic overstates
+significance), the non-stationarity visible in the decade table, the errors-in-variables
+attenuation implied by rung 2's measurement noise of 0.065 per window, and — the thing that decides
+whether any of this is tradeable — transaction costs, since single-name option spreads are wide and
+a dispersion trade pays them on 51 legs.
+
+### Data limitations
+
+OptionMetrics begins in 1996, so rungs 3–4 run on a shorter sample than rung 2's 1990 start. SPX
+carries a surface row with a null implied volatility on 17 of 7,463 trading days (0.23%); those
+windows keep their realised measurement and lose only the implied leg, and the omission is
+reported rather than silently filled.
 
 ## Reproducing
 

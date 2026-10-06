@@ -80,9 +80,12 @@ import pandas as pd
 
 from dispersion.correlation import average_correlation
 from dispersion.data import (
+    SPX_SECID,
     InsufficientData,
+    fetch_atm_implied_vols,
     fetch_index_membership,
     fetch_index_returns,
+    fetch_optionmetrics_link,
     fetch_stock_panel,
     formation_weights,
     members_on,
@@ -91,6 +94,7 @@ from dispersion.realized import TRADING_DAYS_PER_YEAR
 
 __all__ = [
     "correlation_window",
+    "implied_correlation_on",
     "realized_correlation_history",
 ]
 
@@ -179,6 +183,72 @@ def correlation_window(
     }
 
 
+def implied_correlation_on(
+    db: Any,
+    as_of: pd.Timestamp,
+    weights: pd.Series,
+    *,
+    days: int = 30,
+) -> dict[str, float | int]:
+    """Implied correlation on ``as_of``, from the same basket the realised measurement uses.
+
+    Takes the formation-date weights computed from CRSP and prices the identical basket off the
+    OptionMetrics surface, so the implied and realised numbers differ only in which volatilities go
+    in. That matters: both sides inherit the same top-50 proxy approximation, so the basket error
+    largely cancels in the rung 4 comparison instead of being an unmeasured wedge between them.
+
+    Names that cannot be linked to OptionMetrics, or that have no surface on the date, are dropped
+    and the remaining weights renormalised - the same rule, and the same reporting obligation, as
+    the realised side.
+    """
+    link = fetch_optionmetrics_link(db, list(weights.index), as_of.strftime("%Y-%m-%d"))
+    if link.empty:
+        raise InsufficientData(f"no OptionMetrics links for any basket name on {as_of.date()}")
+
+    surface = fetch_atm_implied_vols(
+        db, [*link.to_numpy().tolist(), SPX_SECID], as_of.strftime("%Y-%m-%d"), days=days
+    )
+    if SPX_SECID not in surface.index:
+        raise InsufficientData(f"no SPX surface on {as_of.date()}")
+
+    index_iv = float(surface.loc[SPX_SECID, "atm_vol"])
+    if not index_iv > 0:
+        # OptionMetrics sometimes carries a surface row for SPX with a NULL implied volatility -
+        # late July and early August 2020, for instance. Diagnose it here rather than letting it
+        # fall through to the basket-coverage message below, which would blame the wrong thing.
+        raise InsufficientData(
+            f"SPX has a surface row on {as_of.date()} but no usable ATM volatility"
+        )
+    usable_links = link[link.isin(surface.index) & link.ne(SPX_SECID)]
+    component_iv = surface.loc[usable_links.to_numpy(), "atm_vol"]
+    component_iv = component_iv[component_iv.notna()]
+
+    usable = usable_links[usable_links.isin(component_iv.index)]
+    if len(usable) < 2:
+        raise InsufficientData(
+            f"only {len(usable)} basket name(s) have an ATM surface on {as_of.date()}"
+        )
+
+    w = weights.loc[usable.index]
+    w = w / w.sum()
+    vols = component_iv.loc[usable.to_numpy()].to_numpy()
+
+    skew_gap = float(
+        (surface.loc[usable.to_numpy(), "call_vol"] - surface.loc[usable.to_numpy(), "put_vol"])
+        .abs()
+        .mean()
+    )
+
+    return {
+        "n_names_implied": len(usable),
+        "unlinked_or_unpriced": int(len(weights) - len(usable)),
+        "index_implied_vol": index_iv,
+        "avg_single_implied_vol": float(w.to_numpy() @ vols),
+        "implied_correlation": average_correlation(index_iv, vols, w.to_numpy()),
+        "call_put_vol_gap": skew_gap,
+    }
+
+
 def realized_correlation_history(
     db: Any,
     start: str,
@@ -188,6 +258,8 @@ def realized_correlation_history(
     top_n: int | None = 50,
     trading_days: int = TRADING_DAYS_PER_YEAR,
     chunk_years: int = 3,
+    implied: bool = False,
+    implied_days: int = 30,
     verbose: bool = False,
 ) -> pd.DataFrame:
     """Monthly realised correlation history over ``[start, end]``.
@@ -220,7 +292,9 @@ def realized_correlation_history(
 
     membership = fetch_index_membership(db, start, end)
     rows: list[dict[str, Any]] = []
-    skipped: list[tuple[pd.Timestamp, str]] = []
+    # ISO strings rather than Timestamps: these ride along in DataFrame.attrs, and pandas
+    # serialises attrs to JSON when writing parquet, where a Timestamp raises.
+    skipped: list[tuple[str, str]] = []
 
     for block_start in range(0, len(formation_dates), chunk_years * 12):
         block = formation_dates[block_start : block_start + chunk_years * 12]
@@ -262,16 +336,20 @@ def realized_correlation_history(
             try:
                 weights, dropped = formation_weights(panel, as_of, members, top_n=top_n)
             except InsufficientData as exc:
-                skipped.append((as_of, str(exc)))
+                skipped.append((as_of.strftime("%Y-%m-%d"), str(exc)))
                 continue
 
             forward_dates = calendar[calendar > as_of][:window]
             if len(forward_dates) < window:
-                skipped.append((as_of, f"only {len(forward_dates)} forward trading days available"))
+                skipped.append(
+                    (as_of.strftime("%Y-%m-%d"), f"only {len(forward_dates)} forward trading days")
+                )
                 continue
             if not forward_dates.isin(wide_returns.index).all():
                 n = int((~forward_dates.isin(wide_returns.index)).sum())
-                skipped.append((as_of, f"{n} forward date(s) absent from the fetched panel"))
+                skipped.append(
+                    (as_of.strftime("%Y-%m-%d"), f"{n} forward date(s) absent from the panel")
+                )
                 continue
 
             try:
@@ -285,17 +363,26 @@ def realized_correlation_history(
                 # Only an expected shortage is skipped. A plain ValueError from here means a
                 # pipeline defect - a name absent from the fetch, misaligned dates, a hole in the
                 # index series - and is allowed to propagate rather than silently cost a window.
-                skipped.append((as_of, str(exc)))
+                skipped.append((as_of.strftime("%Y-%m-%d"), str(exc)))
                 continue
 
-            rows.append(
-                {
-                    "formation_date": as_of,
-                    "window_end": forward_dates[-1],
-                    "dropped_at_formation": dropped,
-                    **measured,
-                }
-            )
+            row = {
+                "formation_date": as_of,
+                "window_end": forward_dates[-1],
+                "dropped_at_formation": dropped,
+                **measured,
+            }
+
+            if implied:
+                # Priced off the same basket as the realised leg, so the two differ only in which
+                # volatilities go in. A date with no usable surface loses only the implied columns;
+                # the realised measurement for that window is still valid and is kept.
+                try:
+                    row.update(implied_correlation_on(db, as_of, weights, days=implied_days))
+                except InsufficientData as exc:
+                    skipped.append((as_of.strftime("%Y-%m-%d"), f"implied leg unavailable: {exc}"))
+
+            rows.append(row)
 
     if not rows:
         raise ValueError(f"no usable windows between {start} and {end}")
@@ -308,7 +395,7 @@ def realized_correlation_history(
     if skipped:
         warnings.warn(
             f"{len(skipped)} of {len(skipped) + len(rows)} month-ends produced no window; "
-            f"first: {skipped[0][0].date()} ({skipped[0][1]}). "
+            f"first: {skipped[0][0]} ({skipped[0][1]}). "
             "The full list is in the result's .attrs['skipped_windows'].",
             UserWarning,
             stacklevel=2,
