@@ -24,6 +24,10 @@ a rung that a later rung rests on is not allowed to be provisional.
 - `uv` manages everything. Python 3.12 pinned via `.python-version`.
 - Run code with `uv run python ...`, `uv run pytest`. Never `pip install` — use `uv add`.
 - pandas is **3.x**: copy-on-write is default. Chained assignment silently no-ops; assign explicitly.
+- **Never call `db.raw_sql`.** It hands pandas a SQLAlchemy 1.4 `Connection`, which pandas 3 does
+  not recognise, so it fails with `'Connection' object has no attribute 'cursor'`. `wrds` pins
+  `sqlalchemy<2`, so upgrading is not an option. Use `dispersion.data.query` instead, which reaches
+  the DBAPI connection underneath. Queries use psycopg2's `%(name)s` parameter style.
 
 ## Code style
 Write code a senior quant would write by hand, not code that shows off.

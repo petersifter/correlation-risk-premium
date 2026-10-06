@@ -65,6 +65,7 @@ __all__ = [
     "fetch_stock_panel",
     "formation_weights",
     "members_on",
+    "query",
     "verify_schema",
 ]
 
@@ -109,6 +110,33 @@ def verify_schema(db: Any) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def query(
+    db: Any,
+    sql: str,
+    params: dict[str, Any] | None = None,
+    date_cols: list[str] | None = None,
+) -> pd.DataFrame:
+    """Run ``sql`` against WRDS and return a DataFrame. Use this instead of ``db.raw_sql``.
+
+    ``wrds.Connection.raw_sql`` hands a SQLAlchemy 1.4 ``Connection`` to
+    ``pandas.read_sql_query``. pandas 3 no longer recognises that object, falls back to treating it
+    as a raw DBAPI connection, and fails with ``AttributeError: 'Connection' object has no
+    attribute 'cursor'``. Upgrading SQLAlchemy is not available as a fix because ``wrds`` pins
+    ``sqlalchemy<2``.
+
+    So reach through to the DBAPI connection that SQLAlchemy is wrapping, which pandas does
+    support. The connection is pooled, so this borrows it rather than owning it - do not close it
+    here. Note that psycopg2's parameter style is ``%(name)s``, which is what every query in this
+    module is written in; a tuple parameter adapts to a SQL list, so ``IN %(permnos)s`` works.
+    """
+    return pd.read_sql_query(
+        sql,
+        db.connection.connection,
+        params=params,
+        parse_dates=date_cols,
+    )
+
+
 def fetch_index_membership(db: Any, start: str, end: str) -> pd.DataFrame:
     """S&P 500 membership spells overlapping ``[start, end]``.
 
@@ -116,14 +144,14 @@ def fetch_index_membership(db: Any, start: str, end: str) -> pd.DataFrame:
     index) has a null ``ending`` in CRSP, which is replaced by a far-future date so that interval
     arithmetic does not need to special-case it.
     """
-    query = """
+    sql = """
         SELECT permno, start AS from_date, ending AS thru_date
         FROM crsp.dsp500list
         WHERE (ending IS NULL OR ending >= %(start)s)
           AND start <= %(end)s
     """
-    membership = db.raw_sql(
-        query, params={"start": start, "end": end}, date_cols=["from_date", "thru_date"]
+    membership = query(
+        db, sql, params={"start": start, "end": end}, date_cols=["from_date", "thru_date"]
     )
     membership["thru_date"] = membership["thru_date"].fillna(pd.Timestamp("2262-01-01"))
     return membership.astype({"permno": "int64"})
@@ -137,14 +165,15 @@ def fetch_stock_panel(db: Any, permnos: list[int], start: str, end: str) -> pd.D
     ``market_cap`` is ``abs(prc) * shrout`` in thousands of dollars; CRSP negates ``prc`` when the
     figure is a bid/ask midpoint rather than a traded close.
     """
-    query = """
+    sql = """
         SELECT date, permno, ret, retx, ABS(prc) * shrout AS market_cap
         FROM crsp.dsf
         WHERE date BETWEEN %(start)s AND %(end)s
           AND permno IN %(permnos)s
     """
-    panel = db.raw_sql(
-        query,
+    panel = query(
+        db,
+        sql,
         params={"start": start, "end": end, "permnos": tuple(permnos)},
         date_cols=["date"],
     )
@@ -158,12 +187,12 @@ def fetch_index_returns(db: Any, start: str, end: str) -> pd.DataFrame:
     options are written on the price index. ``vwretd`` - the CRSP value-weighted total return - is
     returned alongside it as a cross-check on the basket construction, not as the measurement.
     """
-    query = """
+    sql = """
         SELECT date, sprtrn, vwretd
         FROM crsp.dsi
         WHERE date BETWEEN %(start)s AND %(end)s
     """
-    return db.raw_sql(query, params={"start": start, "end": end}, date_cols=["date"])
+    return query(db, sql, params={"start": start, "end": end}, date_cols=["date"])
 
 
 def members_on(membership: pd.DataFrame, as_of: pd.Timestamp) -> pd.Index:
