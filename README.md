@@ -9,7 +9,8 @@ This repository measures that price, asks whether it is systematically too high,
 position that harvests it, and then examines what happens in the periods where the trade
 famously breaks.
 
-> **Status:** under construction. Rung 1 of 6 complete.
+> **Status:** under construction. Rung 1 complete; rung 2's arithmetic complete, CRSP data layer
+> outstanding.
 
 ## The build order
 
@@ -18,7 +19,7 @@ Each rung is completed, tested and committed before the next begins.
 | Rung | | Status |
 | --- | --- | --- |
 | 1 | The variance identity, solved for average correlation | ✅ |
-| 2 | Realised correlation from CRSP returns | |
+| 2 | Realised correlation from CRSP returns | arithmetic ✅, data layer next |
 | 3 | Implied correlation from the OptionMetrics surface | |
 | 4 | The premium: implied versus subsequently realised | |
 | 5 | The position: vega-weighted straddles, delta hedging, costs | |
@@ -47,6 +48,30 @@ short the first and long the second.
 The approximation is **exact** whenever the pairwise correlations are homogeneous; all of its error
 comes from dispersion in the `ρᵢⱼ` themselves. `ρ̄` is a genuine weighted average of the pairwise
 correlations, so it can never fall outside their range. Both facts are asserted in the tests.
+
+## Rung 2 — realised correlation
+
+The same identity, applied to a rolling window of daily returns, gives a history of how correlated
+the index members actually were.
+
+Two measurement choices are worth stating, because both have consequences.
+
+**Volatilities are not demeaned.** Realised volatility is computed as `√(mean(r²)·252)` rather than
+as a sample standard deviation. Over a 21-day window the mean daily return is almost pure noise, so
+subtracting it adds variance to the estimator. More importantly, implied volatility is a pure
+second-moment quantity — an option price says nothing about drift — and rung 4 compares the two
+directly. Demeaning one side and not the other would be a silent mismatch. This is also what
+variance swaps pay on.
+
+**The index return is the real index, not a reconstruction.** Building the index from its own
+constituents makes the identity hold by construction, which proves the code is right but measures
+nothing. The genuine measurement uses the actual index series and reports the basis between the two
+as a diagnostic. Rung 3 compares against SPX options, so the index leg has to be the real index.
+
+The non-demeaning choice has a convenient consequence that the test suite exploits: when the index
+is reconstructed from its constituents, the identity holds **exactly** on sample moments, because
+the matrix of non-demeaned second moments *is* a covariance matrix. That gives a zero-tolerance
+correctness test on the whole pipeline rather than one that has to allow for sampling error.
 
 ## Reproducing
 
