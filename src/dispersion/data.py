@@ -52,6 +52,7 @@ clear error rather than a confusing empty frame.
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import numpy as np
@@ -59,6 +60,7 @@ import pandas as pd
 
 __all__ = [
     "REQUIRED_TABLES",
+    "InsufficientData",
     "connect",
     "fetch_index_membership",
     "fetch_index_returns",
@@ -68,6 +70,21 @@ __all__ = [
     "query",
     "verify_schema",
 ]
+
+
+class InsufficientData(ValueError):
+    """A window cannot be measured from the data available, and that is expected.
+
+    Distinct from a plain ``ValueError``, which in this package always means a programming or
+    pipeline defect - misaligned frames, weights that do not sum to 1, a name absent from a fetch.
+    The distinction exists so that the driver in ``history.py`` can skip the former without
+    swallowing the latter. Catching bare ``ValueError`` around a measurement loop silences the
+    guards written to catch survivorship bugs, which is the opposite of what they are for.
+
+    Legitimate causes: too few index members have a usable market capitalisation on the formation
+    date (early history, or a sparse sample), or too few have complete returns over the window.
+    """
+
 
 REQUIRED_TABLES: dict[str, tuple[str, ...]] = {
     "crsp.dsp500list": ("permno", "start", "ending"),
@@ -129,12 +146,22 @@ def query(
     here. Note that psycopg2's parameter style is ``%(name)s``, which is what every query in this
     module is written in; a tuple parameter adapts to a SQL list, so ``IN %(permnos)s`` works.
     """
-    return pd.read_sql_query(
-        sql,
-        db.connection.connection,
-        params=params,
-        parse_dates=date_cols,
-    )
+    # pandas warns once per query that a non-SQLAlchemy DBAPI object is untested. That is
+    # precisely the workaround above, deliberately chosen, so the warning carries no information -
+    # but it fires on every call and drowns out warnings that do matter, such as the skipped-window
+    # warning from history.py. Suppress this one message only, never the category.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="pandas only supports SQLAlchemy connectable",
+            category=UserWarning,
+        )
+        return pd.read_sql_query(
+            sql,
+            db.connection.connection,
+            params=params,
+            parse_dates=date_cols,
+        )
 
 
 def fetch_index_membership(db: Any, start: str, end: str) -> pd.DataFrame:
@@ -243,11 +270,13 @@ def formation_weights(
     caps = caps.dropna()
 
     if caps.empty:
-        raise ValueError(f"no constituent has a usable market capitalisation on {as_of.date()}")
+        raise InsufficientData(
+            f"no constituent has a usable market capitalisation on {as_of.date()}"
+        )
     if top_n is not None:
         caps = caps.nlargest(top_n)
     if caps.size < 2:
-        raise ValueError(
+        raise InsufficientData(
             f"only {caps.size} constituent(s) usable on {as_of.date()}; correlation needs two"
         )
 

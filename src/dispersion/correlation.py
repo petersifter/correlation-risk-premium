@@ -42,10 +42,23 @@ Equation (3) is what the market means by *implied correlation* when the volatili
 and what we mean by *realised correlation* when they are realised. The dispersion trade is short
 the first and long the second.
 
-This is the approximation used by Cboe's implied correlation indices and by every dispersion desk;
-it is not a shortcut invented here. Note that it is **exact**, not approximate, whenever the
-pairwise correlations are homogeneous - the error comes entirely from dispersion in the ``rho_ij``
-themselves. ``tests/test_correlation.py`` asserts exactly that.
+This is the construction Cboe publishes its implied correlation indices from, verified against
+the COR3M white paper (v1.0.5): the index is "the difference between the SPX option implied
+variance and the implied variance of an uncorrelated portfolio of the top 50 SPX components by
+market capitalization", divided by "the sum of pairwise weighted implied volatility products".
+Those two phrases are exactly the numerator and denominator of (3) - the diagonal term ``B`` is
+included, which is the detail most informal write-ups get wrong by using ``sigma_I^2 / A^2``.
+
+One part of Cboe's methodology could not be read: Step 1 of the white paper lists top-50 SPX
+weights summing to 54.43%, and Step 2 converts those into basket weights with a formula that is an
+unreadable image. Renormalising to 1 is near-certain - raw weights summing to 0.54 would make the
+basket variance far smaller than the SPX variance and drive the ratio above 1, which is impossible
+given published COR1M values in the 20-60 range - but it is an inference, not a verified fact.
+Rung 3 settles it numerically by comparing computed implied correlation against published COR1M.
+
+Note the approximation is **exact**, not approximate, whenever the pairwise correlations are
+homogeneous - the error comes entirely from dispersion in the ``rho_ij`` themselves.
+``tests/test_correlation.py`` asserts exactly that.
 
 Two limiting cases, worth carrying in your head as a permanent sanity check::
 

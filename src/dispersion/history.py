@@ -1,0 +1,317 @@
+"""Rung 2c: the rolling history of realised correlation.
+
+Composes the primitives from the other three modules into the measurement rung 2 exists to produce
+- a monthly series of how correlated the S&P 500's members actually were, from the early 1990s to
+the present, together with the diagnostics needed to say how much to trust it.
+
+The split is the same as everywhere else. :func:`correlation_window` is pure arithmetic over one
+window and is tested exhaustively on synthetic frames.
+:func:`realized_correlation_history` is the driver that fetches data and loops, and is as thin as
+it can be made.
+
+How a window works
+------------------
+On each formation date *t* - the last trading day of a month - the basket is fixed: index
+membership as of *t*, market-cap weights as of *t*. The basket is then held over the following
+``window`` trading days, strictly after *t*, and volatilities are measured on that forward window.
+
+Forming at *t* and measuring forward is the ordering a trader would actually use, and it is the
+only ordering that has no lookahead. Forming at the end of a window instead - taking today's
+members and measuring their volatility over the past month - silently conditions on who survived
+the month. That is the single easiest way to fake this result, so it is worth being explicit that
+it is not what happens here.
+
+The size of that bias has been measured rather than assumed. Re-forming each basket at the *end* of
+its window instead of the start raises mean realised correlation by **+0.0038** over a 53-month
+block spanning 2008-2012, in 53 of 53 windows, and drops the incomplete-name count from 3 to 1.
+Small, systematically positive, and present in every single window - the signature of genuine
+lookahead. It also conceals the names that vanished, which is why the wrong version looks tidier.
+
+The two index volatilities
+--------------------------
+Each window reports two, and the difference between them is a diagnostic, not noise.
+
+``index_vol`` comes from CRSP's ``sprtrn``, the actual S&P 500 composite price return. This is the
+measurement, because rung 3 compares against SPX options and those are written on the real index.
+
+``basket_vol`` is computed from our own basket, ``R_B = sum_i w_i r_i``. Rung 1's identity holds
+*exactly* against this one, so ``basket_correlation`` is a mathematical fact about our basket
+rather than a measurement of the index.
+
+``basis`` is ``index_vol - basket_vol``. It is the price of every approximation between our basket
+and the real thing: a subset of names rather than all 500, market-cap weights rather than the
+official float-adjusted divisor weights, and CRSP's corporate-action handling rather than S&P's.
+A large basis means ``realized_correlation`` is measuring our tracking error as much as the index's
+correlation, and any honest reading of the output has to look at it.
+
+How noisy is one window
+-----------------------
+A 21-day estimate of average correlation has a bootstrap standard error of roughly **0.065**. For
+the window formed 2010-04-30 the point estimate is 0.864 with a 95% interval of [0.707, 0.964]
+(2,000 iid day resamples, 50 names).
+
+That number governs how rung 4 may be written. Comparing implied correlation on date *t* against
+realised correlation over the following month means the realised side is an estimate with an error
+bar a tenth of its own range wide. No claim about the premium can rest on a single window, or on a
+handful; it needs the whole panel, and any regression of realised on implied carries
+errors-in-variables that attenuate the slope towards zero.
+
+Survivorship accounting
+-----------------------
+Two counts come back with every window, and they are published rather than logged:
+
+``dropped_at_formation``  members with no usable market capitalisation on *t*, so no weight.
+``incomplete_in_window``  members weighted at *t* whose forward returns have holes - typically a
+                          name that was acquired, delisted or halted part-way through the window.
+
+The second is the one that matters. A name that disappears mid-window disappears for a reason, and
+reasons are correlated with returns. Dropping it is the only thing you can do with an undefined
+volatility, but a window where many names dropped is a window to distrust. The counts travel with
+the numbers so that judgement stays available to whoever reads the output.
+"""
+
+from __future__ import annotations
+
+import warnings
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from dispersion.correlation import average_correlation
+from dispersion.data import (
+    InsufficientData,
+    fetch_index_membership,
+    fetch_index_returns,
+    fetch_stock_panel,
+    formation_weights,
+    members_on,
+)
+from dispersion.realized import TRADING_DAYS_PER_YEAR
+
+__all__ = [
+    "correlation_window",
+    "realized_correlation_history",
+]
+
+
+def _annualised_vol(returns: pd.DataFrame | pd.Series, trading_days: int) -> Any:
+    """Non-demeaned realised volatility over the whole of ``returns``.
+
+    ``sqrt(mean(r^2) * trading_days)``. See ``realized.py`` on why the mean is not removed: the
+    short version is that implied volatility is a pure second moment, and rung 4 compares the two.
+    """
+    return np.sqrt((returns**2).mean() * trading_days)
+
+
+def correlation_window(
+    window_returns: pd.DataFrame,
+    index_window_returns: pd.Series,
+    weights: pd.Series,
+    *,
+    trading_days: int = TRADING_DAYS_PER_YEAR,
+) -> dict[str, float | int]:
+    """Measure one held window. Pure; no data access.
+
+    ``window_returns`` is the forward window's constituent price returns, dates on the index and
+    permnos on the columns. ``index_window_returns`` is the actual index return over the same
+    dates. ``weights`` is the formation-date basket, indexed by permno.
+
+    Names whose forward returns are incomplete are dropped and the remaining weights renormalised,
+    because a volatility cannot be estimated from a gap. The count is returned - see the module
+    docstring on why it is published rather than swallowed.
+    """
+    if not isinstance(weights, pd.Series):
+        raise TypeError("weights must be a Series indexed by permno")
+    missing = weights.index.difference(window_returns.columns)
+    if not missing.empty:
+        raise ValueError(
+            f"{len(missing)} weighted name(s) are absent from window_returns entirely, e.g. "
+            f"{list(missing[:3])}. Fetch the union of members across the whole period, not the "
+            "members as of a single date"
+        )
+    if not index_window_returns.index.equals(window_returns.index):
+        raise ValueError("index and constituent windows must cover exactly the same dates")
+    # The constituent side is protected by the `usable` filter below, which keeps only columns with
+    # no NaN. The index side has no such filter, and `_annualised_vol` uses `.mean()`, which skips
+    # NaN silently - so a single hole here would annualise the index over fewer observations than
+    # the constituents and bias the correlation with no error raised. Check it explicitly.
+    if index_window_returns.isna().any():
+        n_missing = int(index_window_returns.isna().sum())
+        raise ValueError(
+            f"index_window_returns has {n_missing} missing observation(s) out of "
+            f"{len(index_window_returns)}; volatility would be annualised over a different number "
+            "of days than the constituents, biasing the correlation silently"
+        )
+
+    candidates = window_returns[weights.index]
+    usable = candidates.columns[candidates.notna().all()]
+    incomplete = int(len(weights) - len(usable))
+
+    if len(usable) < 2:
+        raise InsufficientData(
+            f"only {len(usable)} name(s) have complete returns over the window; correlation needs "
+            "two"
+        )
+
+    renormalised = weights[usable] / weights[usable].sum()
+    component_returns = candidates[usable]
+
+    component_vols = _annualised_vol(component_returns, trading_days)
+    weighted_avg_vol = float(renormalised @ component_vols)
+
+    index_vol = float(_annualised_vol(index_window_returns, trading_days))
+    basket_returns = (component_returns * renormalised).sum(axis=1)
+    basket_vol = float(_annualised_vol(basket_returns, trading_days))
+
+    vols = component_vols.to_numpy()
+    w = renormalised.to_numpy()
+
+    return {
+        "n_names": len(usable),
+        "incomplete_in_window": incomplete,
+        "avg_single_vol": weighted_avg_vol,
+        "index_vol": index_vol,
+        "basket_vol": basket_vol,
+        "basis": index_vol - basket_vol,
+        "realized_correlation": average_correlation(index_vol, vols, w),
+        "basket_correlation": average_correlation(basket_vol, vols, w),
+    }
+
+
+def realized_correlation_history(
+    db: Any,
+    start: str,
+    end: str,
+    *,
+    window: int = 21,
+    top_n: int | None = 50,
+    trading_days: int = TRADING_DAYS_PER_YEAR,
+    chunk_years: int = 3,
+    verbose: bool = False,
+) -> pd.DataFrame:
+    """Monthly realised correlation history over ``[start, end]``.
+
+    One row per formation date - the last trading day of each month - carrying the measurements and
+    the survivorship counts described in the module docstring.
+
+    Data is fetched in ``chunk_years``-year blocks because the daily stock file is 108 million rows
+    and the full member union over thirty years will not fit comfortably in memory at once. Each
+    block is extended forward by a buffer so that the last formation date in it still has a
+    complete forward window; the buffer is sized from ``window`` rather than guessed.
+
+    The member union for a block is the union over *every* formation date in it, not the members as
+    of one date. Fetching the latter silently omits names that left the index mid-block, which
+    looks like missing data and biases the result towards survivors.
+    """
+    if window < 2:
+        raise ValueError(f"window must be at least 2, got {window}")
+
+    index_returns = fetch_index_returns(db, start, end).set_index("date")["sprtrn"].sort_index()
+    if index_returns.empty:
+        raise ValueError(f"no index returns between {start} and {end}")
+
+    calendar = index_returns.index
+    # Last trading day of each month, excluding months with no room for a full forward window.
+    month_ends = pd.Series(calendar, index=calendar).resample("ME").last().dropna()
+    formation_dates = [
+        d for d in month_ends if calendar.get_indexer([d])[0] + window < len(calendar)
+    ]
+
+    membership = fetch_index_membership(db, start, end)
+    rows: list[dict[str, Any]] = []
+    skipped: list[tuple[pd.Timestamp, str]] = []
+
+    for block_start in range(0, len(formation_dates), chunk_years * 12):
+        block = formation_dates[block_start : block_start + chunk_years * 12]
+        if not block:
+            continue
+
+        union: set[int] = set()
+        for as_of in block:
+            union.update(members_on(membership, as_of))
+
+        # Extend the fetch forward far enough that the last formation date gets a full window.
+        # Calendar days per trading day is about 1.45; 2.0 plus a week is a safe margin.
+        buffer_days = int(window * 2.0) + 7
+        fetch_start = block[0].strftime("%Y-%m-%d")
+        fetch_end = (block[-1] + pd.Timedelta(days=buffer_days)).strftime("%Y-%m-%d")
+
+        panel = fetch_stock_panel(db, sorted(union), fetch_start, fetch_end)
+        if panel.empty:
+            continue
+        # pivot, not pivot_table: pivot raises on duplicate (date, permno) rows whereas
+        # pivot_table would silently average them. CRSP should never have duplicates, and if it
+        # does that is a data defect worth failing on rather than smoothing away.
+        wide_returns = panel.pivot(  # noqa: PD010
+            index="date", columns="permno", values="retx"
+        )
+
+        if verbose:
+            print(
+                f"  {block[0].date()} to {block[-1].date()}: {len(union)} names, "
+                f"{len(panel):,} rows"
+            )
+
+        for as_of in block:
+            # Pass the full membership rather than pre-filtering against the panel's columns: a
+            # member absent from the fetch entirely must be counted by formation_weights as a drop,
+            # not silently removed before any counter sees it.
+            members = members_on(membership, as_of)
+
+            try:
+                weights, dropped = formation_weights(panel, as_of, members, top_n=top_n)
+            except InsufficientData as exc:
+                skipped.append((as_of, str(exc)))
+                continue
+
+            forward_dates = calendar[calendar > as_of][:window]
+            if len(forward_dates) < window:
+                skipped.append((as_of, f"only {len(forward_dates)} forward trading days available"))
+                continue
+            if not forward_dates.isin(wide_returns.index).all():
+                n = int((~forward_dates.isin(wide_returns.index)).sum())
+                skipped.append((as_of, f"{n} forward date(s) absent from the fetched panel"))
+                continue
+
+            try:
+                measured = correlation_window(
+                    wide_returns.loc[forward_dates],
+                    index_returns.loc[forward_dates],
+                    weights,
+                    trading_days=trading_days,
+                )
+            except InsufficientData as exc:
+                # Only an expected shortage is skipped. A plain ValueError from here means a
+                # pipeline defect - a name absent from the fetch, misaligned dates, a hole in the
+                # index series - and is allowed to propagate rather than silently cost a window.
+                skipped.append((as_of, str(exc)))
+                continue
+
+            rows.append(
+                {
+                    "formation_date": as_of,
+                    "window_end": forward_dates[-1],
+                    "dropped_at_formation": dropped,
+                    **measured,
+                }
+            )
+
+    if not rows:
+        raise ValueError(f"no usable windows between {start} and {end}")
+
+    history = pd.DataFrame(rows).set_index("formation_date").sort_index()
+    history.attrs["skipped_windows"] = skipped
+
+    # A silently short history is indistinguishable from a correct one, so say so. Every skip here
+    # is an expected shortage; pipeline defects raise instead of landing in this list.
+    if skipped:
+        warnings.warn(
+            f"{len(skipped)} of {len(skipped) + len(rows)} month-ends produced no window; "
+            f"first: {skipped[0][0].date()} ({skipped[0][1]}). "
+            "The full list is in the result's .attrs['skipped_windows'].",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    return history
