@@ -1,5 +1,7 @@
 # Correlation risk premium
 
+[![CI](https://github.com/petersifter/correlation-risk-premium/actions/workflows/ci.yml/badge.svg)](https://github.com/petersifter/correlation-risk-premium/actions/workflows/ci.yml)
+
 Implied and realized correlation of the S&P 500, and whether the dispersion trade that sells the
 difference makes money.
 
