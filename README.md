@@ -9,8 +9,7 @@ This repository measures that price, asks whether it is systematically too high,
 position that harvests it, and then examines what happens in the periods where the trade
 famously breaks.
 
-> **Status:** under construction. Rungs 1-3 complete; rung 4's headline measured, its
-> inference outstanding.
+> **Status:** under construction. Rungs 1-4 complete. Rung 5 (the position and its costs) next.
 
 ## The build order
 
@@ -21,7 +20,7 @@ Each rung is completed, tested and committed before the next begins.
 | 1 | The variance identity, solved for average correlation | ✅ |
 | 2 | Realised correlation from CRSP returns | ✅ |
 | 3 | Implied correlation from the OptionMetrics surface | ✅ |
-| 4 | The premium: implied versus subsequently realised | measured, inference next |
+| 4 | The premium: implied versus subsequently realised | ✅ |
 | 5 | The position: vega-weighted straddles, delta hedging, costs | |
 | 6 | The tail: February 2018, March 2020 | |
 
@@ -157,9 +156,7 @@ setting costs no coverage.
 
 **The market charges more for correlation than correlation turns out to be**, by about 7
 correlation points on average, in roughly three windows out of four. That is the premium a
-dispersion seller is harvesting.
-
-**And it has decayed sharply.**
+dispersion seller is harvesting — and the more interesting fact about it is that it is mostly gone.
 
 | decade | windows | implied | realised | premium | % positive |
 | --- | --- | --- | --- | --- | --- |
@@ -169,8 +166,10 @@ dispersion seller is harvesting.
 | 2020s | 58 | 0.332 | 0.305 | +0.027 | 60% |
 
 The edge was large and nearly automatic in the late 1990s and is a quarter of that size today, with
-the hit rate falling from 92% to 60%. Any claim that this is a tradeable strategy today has to
-contend with that, and the honest reading is that it has been substantially arbitraged away.
+the hit rate falling from 92% to 60%. **This is the project's headline, not the +0.072.** A
+correlation risk premium has been documented for twenty years; what a trading desk wants to know is
+whether it is still there, and the answer on this evidence is: much less than it was. Any claim that
+this is tradeable today has to clear a 0.027 premium net of costs on 51 option legs.
 
 **The losses are concentrated and brutal.** The worst window was formed 2018-01-31 — the window
 containing 5 February 2018, "Volmageddon". Implied correlation was 0.183; realised came in at

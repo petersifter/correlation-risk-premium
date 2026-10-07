@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from matplotlib.ticker import FuncFormatter, PercentFormatter
 
@@ -24,7 +25,11 @@ GRID = "#e5e4e0"
 SERIES_1 = "#2a78d6"
 SERIES_2 = "#eb6834"
 
-__all__ = ["plot_correlation_premium", "plot_realized_correlation"]
+__all__ = [
+    "plot_correlation_premium",
+    "plot_premium_inference",
+    "plot_realized_correlation",
+]
 
 
 def _separated_peaks(series: pd.Series, count: int, min_years: int = 3) -> pd.Series:
@@ -280,6 +285,114 @@ def plot_correlation_premium(history: pd.DataFrame, path: str | Path) -> Path:
         "Implied is the 30-day 50-delta surface on the formation date; realised is the following "
         "21 trading days. Both legs use the identical top-50 basket and weights, so the proxy "
         "approximation largely cancels between them.",
+        color=TEXT_SECONDARY,
+        fontsize=8.5,
+    )
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=160, facecolor=SURFACE, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def plot_premium_inference(
+    history: pd.DataFrame,
+    path: str | Path,
+) -> Path:
+    """Two panels: is the forecast unbiased, and has the premium decayed.
+
+    Left, the Mincer-Zarnowitz scatter. The grey 45-degree line is what an unbiased forecast would
+    trace; the orange line is the fitted relationship. A fitted slope visibly flatter than 45
+    degrees *is* the over-reaction result - implied correlation moves around more than realised
+    correlation does.
+
+    Right, the decade means with robust 95% intervals. Point estimates alone invite the reader to
+    see a trend whether or not one is there, so this panel exists to show whether the intervals
+    actually separate - and whether the most recent one still clears zero.
+    """
+    from dispersion.inference import forecast_regression, subsample_means
+
+    both = history.dropna(subset=["implied_correlation"])
+    premium = both["implied_correlation"] - both["realized_correlation"]
+    fit = forecast_regression(both["realized_correlation"], both["implied_correlation"])
+    decades = subsample_means(premium, pd.Series(both.index.year // 10 * 10, index=both.index))
+
+    fig, (left, right) = plt.subplots(1, 2, figsize=(12, 5.2), gridspec_kw={"wspace": 0.22})
+    fig.patch.set_facecolor(SURFACE)
+
+    grid = np.linspace(0.0, 1.0, 50)
+    left.plot(
+        grid,
+        grid,
+        color=TEXT_SECONDARY,
+        linewidth=1.0,
+        linestyle=(0, (4, 3)),
+        label="unbiased forecast (slope 1)",
+        zorder=2,
+    )
+    left.scatter(
+        both["implied_correlation"],
+        both["realized_correlation"],
+        s=14,
+        color=SERIES_1,
+        alpha=0.45,
+        linewidth=0,
+        zorder=3,
+    )
+    left.plot(
+        grid,
+        fit.alpha + fit.beta * grid,
+        color=SERIES_2,
+        linewidth=2.0,
+        label=f"fitted (slope {fit.beta:.2f})",
+        zorder=4,
+    )
+
+    left.set_xlim(0, 1)
+    left.set_ylim(0, 1)
+    left.set_xlabel("implied correlation", color=TEXT_SECONDARY, fontsize=10)
+    left.set_ylabel("subsequently realised correlation", color=TEXT_SECONDARY, fontsize=10)
+    left.set_title(
+        "Implied correlation over-reacts", color=TEXT_PRIMARY, fontsize=12, loc="left", pad=12
+    )
+    left.legend(loc="upper left", frameon=False, fontsize=9, labelcolor=TEXT_SECONDARY)
+    _recede(left)
+
+    positions = np.arange(len(decades))
+    right.axvline(0.0, color=TEXT_SECONDARY, linewidth=1.0, zorder=2)
+    for y, (_, row) in zip(positions, decades.iterrows(), strict=True):
+        clears_zero = row["ci_low"] > 0
+        colour = SERIES_1 if clears_zero else SERIES_2
+        right.plot([row["ci_low"], row["ci_high"]], [y, y], color=colour, linewidth=2.0, zorder=3)
+        right.plot([row["mean"]], [y], marker="o", markersize=7, color=colour, zorder=4)
+        right.annotate(
+            f"{row['mean']:+.3f}",
+            xy=(row["ci_high"], y),
+            xytext=(8, -3),
+            textcoords="offset points",
+            color=TEXT_PRIMARY,
+            fontsize=9,
+        )
+
+    right.set_yticks(positions)
+    right.set_yticklabels([f"{int(d)}s" for d in decades.index])
+    right.invert_yaxis()
+    right.set_xlim(-0.03, 0.25)
+    # A real MINUS SIGN, not a hyphen: rendered chart text, where it is the correct glyph.
+    premium_label = "premium (implied − realised), 95% interval"  # noqa: RUF001
+    right.set_xlabel(premium_label, color=TEXT_SECONDARY, fontsize=10)
+    right.set_title(
+        "and the premium has decayed", color=TEXT_PRIMARY, fontsize=12, loc="left", pad=12
+    )
+    _recede(right)
+
+    fig.text(
+        0.125,
+        0.015,
+        f"{len(both)} monthly windows, {both.index[0]:%b %Y} to {both.index[-1]:%b %Y}. "
+        "Intervals are Newey-West with Bartlett weights at the automatic lag. The 2020s "
+        "interval includes zero.",
         color=TEXT_SECONDARY,
         fontsize=8.5,
     )
