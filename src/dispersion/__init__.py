@@ -17,18 +17,30 @@ from dispersion.inference import (
     subsample_means,
 )
 from dispersion.realized import annualized_vol, basket_return
+from dispersion.strategy import (
+    expanding_quantile_signal,
+    gross_pnl,
+    net_pnl,
+    performance,
+    trading_cost,
+)
 
 __all__ = [
     "annualized_vol",
     "average_correlation",
     "basket_return",
     "correlation_window",
+    "expanding_quantile_signal",
     "forecast_regression",
+    "gross_pnl",
     "hac_regression",
     "implied_correlation_on",
     "index_variance",
     "index_vol_from_average_correlation",
+    "net_pnl",
     "newey_west_mean",
+    "performance",
     "realized_correlation_history",
     "subsample_means",
+    "trading_cost",
 ]

@@ -10,6 +10,7 @@ import pandas as pd
 from matplotlib.ticker import PercentFormatter
 
 from dispersion.inference import forecast_regression, subsample_means
+from dispersion.strategy import gross_pnl, net_pnl, trading_cost
 
 BLUE, ORANGE, GREY = "tab:blue", "tab:orange", "grey"
 
@@ -17,6 +18,7 @@ __all__ = [
     "plot_correlation_premium",
     "plot_premium_inference",
     "plot_realized_correlation",
+    "plot_strategy_pnl",
 ]
 
 
@@ -167,5 +169,39 @@ def plot_premium_inference(history: pd.DataFrame, path: str | Path) -> Path:
     right.set_xlabel("mean premium (implied - realized), Newey-West 95% CI")
     right.set_title("Premium by decade")
     _tidy(right)
+
+    return _save(fig, path)
+
+
+def plot_strategy_pnl(history: pd.DataFrame, path: str | Path) -> Path:
+    """Cumulative gross and net P&L (top) and mean net P&L by five-year period (bottom)."""
+    both = history.dropna(subset=["implied_correlation", "basket_half_spread_volpts"])
+    gross, cost, net = gross_pnl(both), trading_cost(both), net_pnl(both)
+
+    fig, (top, bottom) = plt.subplots(
+        2, 1, figsize=(10, 6.8), height_ratios=[3, 2], gridspec_kw={"hspace": 0.35}
+    )
+
+    top.plot(gross.index, gross.cumsum(), color=BLUE, lw=1.5, label="gross")
+    top.plot(net.index, net.cumsum(), color=ORANGE, lw=1.5, label="net of quoted half-spread")
+    top.axhline(0.0, color="black", lw=0.8)
+    top.set_ylabel("cumulative vol points")
+    top.set_title("Dispersion P&L per unit of index vega")
+    top.legend(loc="upper left", frameon=False)
+    _tidy(top)
+
+    era = (both.index.year // 5 * 5).astype(int)
+    table = pd.DataFrame({"gross": gross, "cost": cost, "net": net}).groupby(era).mean()
+    x = np.arange(len(table))
+    width = 0.27
+    bottom.bar(x - width, table["gross"], width, color=BLUE, label="gross")
+    bottom.bar(x, table["cost"], width, color=GREY, label="cost")
+    bottom.bar(x + width, table["net"], width, color=ORANGE, label="net")
+    bottom.axhline(0.0, color="black", lw=0.8)
+    bottom.set_xticks(x, [f"{y}-{str(y + 4)[-2:]}" for y in table.index])
+    bottom.set_ylabel("mean per month, vol points")
+    bottom.set_title("By five-year period")
+    bottom.legend(loc="upper right", frameon=False, ncols=3)
+    _tidy(bottom)
 
     return _save(fig, path)
