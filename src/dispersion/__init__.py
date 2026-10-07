@@ -10,6 +10,12 @@ from dispersion.history import (
     implied_correlation_on,
     realized_correlation_history,
 )
+from dispersion.inference import (
+    forecast_regression,
+    hac_regression,
+    newey_west_mean,
+    subsample_means,
+)
 from dispersion.realized import annualized_vol, basket_return
 
 __all__ = [
@@ -17,8 +23,12 @@ __all__ = [
     "average_correlation",
     "basket_return",
     "correlation_window",
+    "forecast_regression",
+    "hac_regression",
     "implied_correlation_on",
     "index_variance",
     "index_vol_from_average_correlation",
+    "newey_west_mean",
     "realized_correlation_history",
+    "subsample_means",
 ]

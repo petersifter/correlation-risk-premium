@@ -9,10 +9,13 @@ import numpy as np
 import pandas as pd
 from matplotlib.ticker import PercentFormatter
 
+from dispersion.inference import forecast_regression, subsample_means
+
 BLUE, ORANGE, GREY = "tab:blue", "tab:orange", "grey"
 
 __all__ = [
     "plot_correlation_premium",
+    "plot_premium_inference",
     "plot_realized_correlation",
 ]
 
@@ -116,5 +119,53 @@ def plot_correlation_premium(history: pd.DataFrame, path: str | Path) -> Path:
     bottom.set_ylabel("implied - realized")
     bottom.legend(loc="lower left", frameon=False)
     _tidy(bottom)
+
+    return _save(fig, path)
+
+
+def plot_premium_inference(history: pd.DataFrame, path: str | Path) -> Path:
+    """Mincer-Zarnowitz scatter (left) and decade means with 95% intervals (right)."""
+    both = history.dropna(subset=["implied_correlation"])
+    premium = both["implied_correlation"] - both["realized_correlation"]
+    fit = forecast_regression(both["realized_correlation"], both["implied_correlation"])
+    decades = subsample_means(premium, pd.Series(both.index.year // 10 * 10, index=both.index))
+
+    fig, (left, right) = plt.subplots(1, 2, figsize=(11, 4.6), gridspec_kw={"wspace": 0.25})
+
+    grid = np.linspace(0.0, 1.0, 50)
+    left.scatter(
+        both["implied_correlation"], both["realized_correlation"], s=12, color=BLUE, alpha=0.5
+    )
+    left.plot(grid, grid, color=GREY, lw=1, ls="--", label="45-degree line")
+    left.plot(
+        grid,
+        fit.alpha + fit.beta * grid,
+        color=ORANGE,
+        lw=1.8,
+        label=f"OLS fit, slope {fit.beta:.2f}",
+    )
+    left.set_xlim(0, 1)
+    left.set_ylim(0, 1)
+    left.set_xlabel("implied correlation")
+    left.set_ylabel("realized correlation, next 21 days")
+    left.set_title("Realized on implied correlation")
+    left.legend(loc="upper left", frameon=False)
+    _tidy(left)
+
+    positions = np.arange(len(decades))
+    right.errorbar(
+        decades["mean"],
+        positions,
+        xerr=[decades["mean"] - decades["ci_low"], decades["ci_high"] - decades["mean"]],
+        fmt="o",
+        color=BLUE,
+        capsize=4,
+    )
+    right.axvline(0.0, color="black", lw=0.8)
+    right.set_yticks(positions, [f"{int(d)}s" for d in decades.index])
+    right.invert_yaxis()
+    right.set_xlabel("mean premium (implied - realized), Newey-West 95% CI")
+    right.set_title("Premium by decade")
+    _tidy(right)
 
     return _save(fig, path)
