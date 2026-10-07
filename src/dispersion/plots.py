@@ -29,6 +29,7 @@ __all__ = [
     "plot_correlation_premium",
     "plot_premium_inference",
     "plot_realized_correlation",
+    "plot_strategy_pnl",
 ]
 
 
@@ -393,6 +394,111 @@ def plot_premium_inference(
         f"{len(both)} monthly windows, {both.index[0]:%b %Y} to {both.index[-1]:%b %Y}. "
         "Intervals are Newey-West with Bartlett weights at the automatic lag. The 2020s "
         "interval includes zero.",
+        color=TEXT_SECONDARY,
+        fontsize=8.5,
+    )
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=160, facecolor=SURFACE, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def plot_strategy_pnl(history: pd.DataFrame, path: str | Path) -> Path:
+    """Cumulative P&L before and after measured costs, and the era breakdown.
+
+    Colour keeps its meaning from the other figures: blue is what the trade earns, orange is what
+    it costs. The top panel's two lines diverging *is* the result - the gap between them is the
+    bid-ask, and by the end it has consumed essentially all of the gross.
+    """
+    from dispersion.strategy import gross_pnl, net_pnl, trading_cost
+
+    both = history.dropna(subset=["implied_correlation", "basket_half_spread_volpts"])
+    gross, cost, net = gross_pnl(both), trading_cost(both), net_pnl(both)
+
+    fig, (top, bottom) = plt.subplots(
+        2, 1, figsize=(11, 7.4), height_ratios=[3, 2], gridspec_kw={"hspace": 0.32}
+    )
+    fig.patch.set_facecolor(SURFACE)
+
+    top.plot(
+        gross.index,
+        gross.cumsum(),
+        color=SERIES_1,
+        linewidth=1.8,
+        label="gross, before trading costs",
+        zorder=3,
+    )
+    top.plot(
+        net.index,
+        net.cumsum(),
+        color=SERIES_2,
+        linewidth=1.8,
+        label="net of measured bid-ask",
+        zorder=4,
+    )
+    top.fill_between(
+        gross.index, gross.cumsum(), net.cumsum(), color=SERIES_2, alpha=0.10, linewidth=0, zorder=1
+    )
+    top.axhline(0.0, color=TEXT_SECONDARY, linewidth=1.0, zorder=2)
+    top.set_ylabel("cumulative volatility points", color=TEXT_SECONDARY, fontsize=10)
+    top.set_title(
+        "Transaction costs consume the dispersion premium",
+        color=TEXT_PRIMARY,
+        fontsize=13,
+        loc="left",
+        pad=14,
+    )
+    top.legend(loc="upper left", frameon=False, fontsize=9, labelcolor=TEXT_SECONDARY)
+    _recede(top)
+
+    era = (both.index.year // 5 * 5).astype(int)
+    table = pd.DataFrame({"gross": gross, "cost": cost, "net": net}).groupby(era).mean()
+    positions = np.arange(len(table))
+
+    bottom.axhline(0.0, color=TEXT_SECONDARY, linewidth=1.0, zorder=3)
+    for x, (_, row) in zip(positions, table.iterrows(), strict=True):
+        colour = SERIES_1 if row["net"] > 0 else SERIES_2
+        bottom.bar(x, row["net"], width=0.55, color=colour, zorder=2)
+        # Value label just outside the bar end, so positive and negative bars never collide.
+        bottom.annotate(
+            f"{row['net']:+.2f}",
+            xy=(x, row["net"]),
+            xytext=(0, 5 if row["net"] > 0 else -5),
+            textcoords="offset points",
+            ha="center",
+            va="bottom" if row["net"] > 0 else "top",
+            color=TEXT_PRIMARY,
+            fontsize=9,
+        )
+        # Components pinned to one fixed row below every bar, rather than offset from each one -
+        # an offset from a negative bar lands on top of that bar's own label.
+        bottom.annotate(
+            f"gross {row['gross']:.2f}\ncost {row['cost']:.2f}",
+            xy=(x, -2.0),
+            ha="center",
+            va="center",
+            color=TEXT_SECONDARY,
+            fontsize=8,
+        )
+
+    bottom.set_xticks(positions)
+    bottom.set_xticklabels([f"{y}-{str(y + 4)[-2:]}" for y in table.index])
+    bottom.set_ylim(-2.4, 3.4)
+    bottom.set_ylabel("mean net, vol points", color=TEXT_SECONDARY, fontsize=10)
+    bottom.set_title(
+        "Profitable only in the late 1990s", color=TEXT_PRIMARY, fontsize=12, loc="left", pad=10
+    )
+    _recede(bottom)
+
+    fig.text(
+        0.125,
+        0.005,
+        f"{len(both)} monthly windows, {both.index[0]:%b %Y} to {both.index[-1]:%b %Y}. "
+        "Per unit of index vega. Costs are quoted OptionMetrics bid-ask converted to "
+        "volatility points by contract vega, charged one way. Commissions and delta-hedging "
+        "costs are not included, so the net shown is an upper bound.",
         color=TEXT_SECONDARY,
         fontsize=8.5,
     )

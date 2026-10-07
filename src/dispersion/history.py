@@ -82,6 +82,7 @@ from dispersion.data import (
     SPX_SECID,
     InsufficientData,
     fetch_atm_implied_vols,
+    fetch_atm_quote_spreads,
     fetch_index_membership,
     fetch_index_returns,
     fetch_optionmetrics_link,
@@ -193,12 +194,13 @@ def implied_correlation_on(
     and the remaining weights renormalised - the same rule, and the same reporting obligation, as
     the realised side.
     """
-    link = fetch_optionmetrics_link(db, list(weights.index), as_of.strftime("%Y-%m-%d"))
+    as_of_str = as_of.strftime("%Y-%m-%d")
+    link = fetch_optionmetrics_link(db, list(weights.index), as_of_str)
     if link.empty:
         raise InsufficientData(f"no OptionMetrics links for any basket name on {as_of.date()}")
 
     surface = fetch_atm_implied_vols(
-        db, [*link.to_numpy().tolist(), SPX_SECID], as_of.strftime("%Y-%m-%d"), days=days
+        db, [*link.to_numpy().tolist(), SPX_SECID], as_of_str, days=days
     )
     if SPX_SECID not in surface.index:
         raise InsufficientData(f"no SPX surface on {as_of.date()}")
@@ -231,6 +233,26 @@ def implied_correlation_on(
         .mean()
     )
 
+    # Quoted half-spreads for the same basket, in volatility points, so the cost of the trade is
+    # measured on the contracts actually traded rather than assumed. Names without a two-sided
+    # market are excluded from the weighted cost and counted, because an untradeable leg is a
+    # coverage problem rather than a free one.
+    spread_table = fetch_atm_quote_spreads(db, [*usable.to_numpy().tolist(), SPX_SECID], as_of_str)
+    spreads = (
+        spread_table["half_spread_volpts"] if not spread_table.empty else pd.Series(dtype=float)
+    )
+    index_half_spread = float(spreads.get(SPX_SECID, float("nan")))
+
+    priced = usable[usable.isin(spreads.index) & usable.ne(SPX_SECID)]
+    if priced.empty:
+        basket_half_spread = float("nan")
+    else:
+        cost_weights = weights.loc[priced.index]
+        cost_weights = cost_weights / cost_weights.sum()
+        basket_half_spread = float(
+            cost_weights.to_numpy() @ spreads.loc[priced.to_numpy()].to_numpy()
+        )
+
     return {
         "n_names_implied": len(usable),
         "unlinked_or_unpriced": int(len(weights) - len(usable)),
@@ -238,6 +260,12 @@ def implied_correlation_on(
         "avg_single_implied_vol": float(w.to_numpy() @ vols),
         "implied_correlation": average_correlation(index_iv, vols, w.to_numpy()),
         "call_put_vol_gap": skew_gap,
+        "index_half_spread_volpts": index_half_spread,
+        "basket_half_spread_volpts": basket_half_spread,
+        "names_without_quotes": int(len(usable) - len(priced)),
+        "cost_tenor_days": float(spread_table.loc[priced.to_numpy(), "days_to_expiry"].median())
+        if not priced.empty
+        else float("nan"),
     }
 
 

@@ -63,6 +63,7 @@ __all__ = [
     "InsufficientData",
     "connect",
     "fetch_atm_implied_vols",
+    "fetch_atm_quote_spreads",
     "fetch_index_membership",
     "fetch_index_returns",
     "fetch_optionmetrics_link",
@@ -385,3 +386,89 @@ def fetch_atm_implied_vols(
     wide["atm_vol"] = wide[["call_vol", "put_vol"]].mean(axis=1)
     wide.index = wide.index.astype("int64")
     return wide[["call_vol", "put_vol", "atm_vol"]]
+
+
+def fetch_atm_quote_spreads(
+    db: Any,
+    secids: list[int],
+    as_of: str,
+    *,
+    target_days: int = 30,
+    days_low: int = 10,
+    days_high: int = 60,
+    delta_low: float = 0.40,
+    delta_high: float = 0.60,
+) -> pd.DataFrame:
+    """Quoted bid-ask half-spread of at-the-money options, in **volatility points**.
+
+    A dispersion trade is priced and hedged in volatility, so its cost has to be expressed the same
+    way or it cannot be netted against the P&L. The conversion uses the option's own vega::
+
+        half-spread in vol points = 100 * (best_offer - best_bid) / (2 * vega)
+
+    OptionMetrics quotes ``vega`` as the price change per **1.00** of volatility, not per
+    percentage point - verified against the textbook at-the-money value ``0.3989 * S * sqrt(T)``,
+    which reproduced a reported SPX vega of 359.96 to within 0.3%. The factor of 100 converts to
+    volatility points and the 2 takes the half-spread, one side being paid on entry.
+
+    Why the maturity window is wide
+    -------------------------------
+    A tight 25-35 day window finds **nothing** before about 2012. Weekly options were not yet
+    widespread, so listed expiries were monthly - the third Friday - and from a month-end formation
+    date the nearest contracts sit roughly 15 and 50 days out. Neither qualifies, and the
+    consequence is a silent loss of sixteen years of the sample rather than an error.
+
+    So the search runs over ``[days_low, days_high]`` and then keeps, for each secid, only the
+    single expiry closest to ``target_days``. The achieved maturity is returned in
+    ``days_to_expiry`` so the compromise is visible: in the weeklies era it sits on 30, and in the
+    early sample it does not, which is a property of what was listed rather than a modelling choice.
+
+    Contracts come from ``opprcd`` rather than the standardised surface because the surface carries
+    no quotes. Quotes with a zero bid or non-positive vega are dropped: a zero bid means no
+    two-sided market, and its spread is not a tradeable cost.
+
+    Returns one row per secid, indexed by secid, with ``half_spread_volpts`` and
+    ``days_to_expiry``. Names with no usable quote simply do not appear.
+    """
+    year = pd.Timestamp(as_of).year
+    sql = f"""
+        SELECT secid,
+               exdate - date AS days_to_expiry,
+               100.0 * (best_offer - best_bid) / (2.0 * vega) AS half_spread_volpts
+        FROM optionm.opprcd{year}
+        WHERE date = %(as_of)s
+          AND secid IN %(secids)s
+          AND exdate - date BETWEEN %(days_low)s AND %(days_high)s
+          AND ABS(delta) BETWEEN %(delta_low)s AND %(delta_high)s
+          AND vega > 0
+          AND best_bid > 0
+          AND best_offer > best_bid
+    """
+
+    quotes = query(
+        db,
+        sql,
+        params={
+            "as_of": as_of,
+            "secids": tuple(int(s) for s in secids),
+            "days_low": days_low,
+            "days_high": days_high,
+            "delta_low": delta_low,
+            "delta_high": delta_high,
+        },
+    )
+    if quotes.empty:
+        return pd.DataFrame(columns=["half_spread_volpts", "days_to_expiry"], dtype=float)
+
+    # Keep only the expiry nearest the target for each name, then take the median across the
+    # handful of near-the-money strikes at that expiry.
+    quotes["distance"] = (quotes["days_to_expiry"] - target_days).abs()
+    nearest = quotes.loc[quotes.groupby("secid")["distance"].idxmin(), ["secid", "days_to_expiry"]]
+    chosen = quotes.merge(nearest, on=["secid", "days_to_expiry"], how="inner")
+
+    result = chosen.groupby("secid").agg(
+        half_spread_volpts=("half_spread_volpts", "median"),
+        days_to_expiry=("days_to_expiry", "first"),
+    )
+    result.index = result.index.astype("int64")
+    return result

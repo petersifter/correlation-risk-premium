@@ -9,7 +9,7 @@ This repository measures that price, asks whether it is systematically too high,
 position that harvests it, and then examines what happens in the periods where the trade
 famously breaks.
 
-> **Status:** under construction. Rungs 1-4 complete. Rung 5 (the position and its costs) next.
+> **Status:** rungs 1-5 complete. Rung 6 (the tail) next.
 
 ## The build order
 
@@ -21,7 +21,7 @@ Each rung is completed, tested and committed before the next begins.
 | 2 | Realised correlation from CRSP returns | ✅ |
 | 3 | Implied correlation from the OptionMetrics surface | ✅ |
 | 4 | The premium: implied versus subsequently realised | ✅ |
-| 5 | The position: vega-weighted straddles, delta hedging, costs | |
+| 5 | The position: vega-weighted straddles, delta hedging, costs | ✅ |
 | 6 | The tail: February 2018, March 2020 | |
 
 ## Rung 1 — the identity
@@ -114,8 +114,8 @@ start.
 
 **A single window is noisier than it looks.** The 21-day correlation estimate for the window formed
 2010-04-30 is 0.864 with a bootstrap standard error of 0.065 and a 95% interval of [0.707, 0.964]
-(2,000 resamples, 50 names). No claim at rung 4 can rest on one window, and a regression of realised
-on implied correlation will carry errors-in-variables attenuation.
+(2,000 resamples, 50 names). No claim at rung 4 can rest on one window, and a regression of
+realised on implied correlation inherits that noise in its residuals.
 
 **The formula matches Cboe's published methodology**, verified against the COR3M white paper
 v1.0.5: the index is the difference between SPX implied variance and "the implied variance of an
@@ -178,14 +178,58 @@ four worst are August 2015, the June 2016 Brexit vote, the May 2010 flash crash,
 A short-correlation book earns small and steady and loses large and sudden, which is the shape the
 decade table is averaging over.
 
-### Not yet claimed
+## Rung 4 — does the premium survive inference
 
-The premium above is a mean difference, not an established risk premium. Rung 4 still owes:
-inference that accounts for autocorrelation in correlation itself (a naive t-statistic overstates
-significance), the non-stationarity visible in the decade table, the errors-in-variables
-attenuation implied by rung 2's measurement noise of 0.065 per window, and — the thing that decides
-whether any of this is tradeable — transaction costs, since single-name option spreads are wide and
-a dispersion trade pays them on 51 legs.
+![Forecast bias and decay](reports/premium_inference.png)
+
+Correlation is persistent, so the premium series is serially correlated and an ordinary standard
+error — which assumes independent observations — understates the uncertainty. Every figure below
+uses a **Newey-West** standard error with Bartlett weights at the Newey-West (1994) automatic lag,
+implemented directly rather than called from a library and checked against `statsmodels` in the
+test suite.
+
+**The premium is real.** Mean +0.0720, Newey-West standard error 0.0093 against a naive 0.0074 — a
+1.25× inflation at 5 lags — giving **t = 7.74** where a naive calculation would claim 9.70.
+
+**But implied correlation is a biased forecast, and not in the way you might assume.** The
+Mincer-Zarnowitz regression `realised = α + β·implied`:
+
+| | estimate | std error | test |
+| --- | --- | --- | --- |
+| α | +0.0324 | 0.0199 | t vs 0 = **+1.63** |
+| β | +0.7505 | 0.0564 | t vs 1 = **−4.42** |
+
+R² = 0.471. The intercept is **not** significantly different from zero, so this is not a constant
+charge added to an otherwise accurate forecast. The slope is significantly below one: implied
+correlation **over-reacts**. A one-point rise in implied forecasts only three-quarters of a point of
+realised. The lines cross at an implied correlation of about 0.13, far below the sample average of
+0.42, so in practice the premium *grows with the level of implied correlation*.
+
+That is sharper than "there is a premium": the edge is conditional. Rung 5 tests whether that
+conditionality is tradeable — and finds it is not, for reasons worth reading.
+
+**The decay survives its own error bars.**
+
+| decade | n | premium | 95% interval | t |
+| --- | --- | --- | --- | --- |
+| 1990s | 48 | +0.169 | [0.138, 0.201] | 10.5 |
+| 2000s | 120 | +0.057 | [0.036, 0.079] | 5.2 |
+| 2010s | 120 | +0.069 | [0.038, 0.101] | 4.4 |
+| 2020s | 58 | +0.027 | **[−0.001, 0.055]** | 1.9 |
+
+The 1990s interval does not overlap any later decade, so the decline is not an artefact of reading
+point estimates off a table. And the 2020s interval **includes zero**: on this evidence the
+correlation risk premium of the last five years is not statistically distinguishable from nothing,
+before a single transaction cost has been charged against it.
+
+### A measurement-error distinction that is easy to get backwards
+
+Rung 2 established that a 21-day realised correlation carries a standard error of about 0.065. That
+noise sits in the *dependent* variable of the regression above, where it inflates residual variance
+and lowers R² but leaves β **unbiased**. Attenuation of β towards zero would require noise in the
+*regressor* — the implied side, from surface interpolation and stale quotes — which is a smaller and
+separate problem. Conflating the two would turn a real over-reaction result into a measurement
+artefact, or hide one.
 
 ### Data limitations
 
@@ -193,6 +237,98 @@ OptionMetrics begins in 1996, so rungs 3–4 run on a shorter sample than rung 2
 carries a surface row with a null implied volatility on 17 of 7,463 trading days (0.23%); those
 windows keep their realised measurement and lose only the implied leg, and the omission is
 reported rather than silently filled.
+
+## Rung 5 — the position, and what it costs
+
+![Strategy P&L](reports/strategy_pnl.png)
+
+Short one index straddle, long a straddle on each of the 50 names, vegas netted to zero. Everything
+is quoted per unit of index vega in **volatility points**, which makes the P&L directly comparable
+with a bid-ask spread measured the same way.
+
+For an at-the-money straddle the delta-hedged P&L collapses to `vega × (σ_realised − σ_implied)`, so
+per unit of index vega the trade earns the realised volatility spread minus the implied one.
+
+### This is not the correlation premium
+
+It is tempting to say the trade harvests what rung 4 measured. It does not. Over the sample the two
+series correlate at only **+0.66** and disagree in sign in **20%** of windows. The decomposition
+says why — of +1.385 volatility points of average gross P&L:
+
+| leg | contribution |
+| --- | --- |
+| short index (VRP captured) | **+1.374** |
+| long single names (VRP paid) | **+0.010** |
+
+Single-name options are priced close to fair on average; index options are rich. **Vega-weighted
+dispersion is overwhelmingly a short index volatility-risk-premium trade**, with the single-name leg
+acting as a hedge that is roughly free but absorbs the volatility-level risk. A study that assumed
+the P&L was the correlation premium would attribute the result to the wrong exposure.
+
+### Costs are measured, not assumed
+
+Quoted OptionMetrics bid-ask, converted to volatility points by each contract's own vega. A
+straddle's spread in vol points equals a single option's — the call and put double both the dollar
+spread and the vega, and the factors cancel.
+
+| | mean, vol points | Newey-West t |
+| --- | --- | --- |
+| gross | +1.385 | +5.48 |
+| cost | −1.355 | 15.86 |
+| **net** | **+0.030** | **+0.14** |
+
+**Transaction costs consume 98% of the gross P&L.** Sharpe 0.04 ± 0.19, hit rate 44%, worst month
+−7.54, maximum drawdown −169 volatility points against a lifetime total of +10.4. A bootstrap
+interval for the mean net P&L is [−0.26, +0.32].
+
+| era | gross | cost | net |
+| --- | --- | --- | --- |
+| 1995-99 | 4.93 | 2.13 | **+2.80** |
+| 2000-04 | 1.95 | 1.37 | +0.58 |
+| 2005-09 | 0.52 | 1.54 | −1.02 |
+| 2010-14 | 1.00 | 0.95 | +0.05 |
+| 2015-19 | 0.26 | 1.01 | −0.76 |
+| 2020-24 | 0.33 | 1.27 | **−0.94** |
+
+The trade worked in the late 1990s and has not covered its costs since.
+
+### A lookahead bug the rigor pass found, and what it cost
+
+Rung 4's finding that implied correlation over-reacts suggests trading only when it is high. The
+first version selected the top quartile with a `quantile(0.75)` computed over the **whole sample** —
+in 1996 nobody knew the 1996-2024 quartile.
+
+| threshold | net | Sharpe |
+| --- | --- | --- |
+| full-sample (leaks) | +0.245 | +0.28 |
+| expanding, shifted (honest) | **−0.266** | **−0.38** |
+
+The entire apparent benefit of conditioning was the leak. Done honestly, conditioning makes the
+strategy **worse**. The threshold is now built from history up to the previous observation only, and
+a test asserts that truncating the series cannot change any earlier signal — the same no-lookahead
+property rung 2's weights are held to.
+
+Neither variant has a Sharpe distinguishable from zero: 0.04 ± 0.19 unconditional and −0.38 ± 0.39
+conditional, using `se(SR) ≈ √((1 + ½·SR²)/T)`.
+
+### Limitations
+
+Stated because they all point the same way — the net above is an **upper bound**.
+
+- **Commissions and exchange fees are not modelled**, and the trade touches 51 option legs monthly.
+- **Delta-hedging costs are not modelled.** The P&L identity assumes continuous hedging; hedging the
+  underlying over 21 days costs equity spread and commission.
+- **Pre-2010, a median of 10 of 50 names have no two-sided quote** and are dropped from the cost
+  calculation with the remaining weights renormalised. Those are the illiquid tail, so their spreads
+  are wider than the ones measured — early-era costs are understated and early profits
+  correspondingly overstated.
+- **The cost tenor is not always 30 days.** Before weekly options, month-end formation dates had no
+  25-35 day contract, so the nearest listed expiry is used (19-22 days early, 29 later). Shorter
+  options carry less vega, so the same dollar spread converts to a larger vol-point cost — biasing
+  early costs *up*, partly offsetting the previous point.
+- **Returns are not normal**: skew +0.89, excess kurtosis +2.33, worst month −2.7σ. The bootstrap
+  interval is quoted for that reason.
+- **Two strategy variants were tried** — unconditional and conditional. Both are reported.
 
 ## Reproducing
 
