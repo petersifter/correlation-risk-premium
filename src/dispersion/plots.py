@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.ticker import PercentFormatter
 
-from dispersion.inference import forecast_regression, subsample_means
+from dispersion.inference import forecast_regression, hac_regression, subsample_means
 from dispersion.strategy import gross_pnl, net_pnl, trading_cost
 
 BLUE, ORANGE, GREY = "tab:blue", "tab:orange", "grey"
@@ -19,6 +19,7 @@ __all__ = [
     "plot_premium_inference",
     "plot_realized_correlation",
     "plot_strategy_pnl",
+    "plot_tail_exposure",
 ]
 
 
@@ -203,5 +204,56 @@ def plot_strategy_pnl(history: pd.DataFrame, path: str | Path) -> Path:
     bottom.set_title("By five-year period")
     bottom.legend(loc="upper right", frameon=False, ncols=3)
     _tidy(bottom)
+
+    return _save(fig, path)
+
+
+def plot_tail_exposure(history: pd.DataFrame, path: str | Path) -> Path:
+    """Net P&L against the market return (left) and the correlation surprise (right)."""
+    both = history.dropna(subset=["implied_correlation", "basket_half_spread_volpts"])
+    pnl = net_pnl(both)
+    market = both["index_return"]
+    surprise = both["realized_correlation"] - both["implied_correlation"]
+
+    quadratic = hac_regression(pnl, {"r": market, "r2": market**2})
+    linear = hac_regression(pnl, {"surprise": surprise})
+
+    fig, (left, right) = plt.subplots(
+        1, 2, figsize=(11, 4.6), sharey=True, gridspec_kw={"wspace": 0.08}
+    )
+
+    left.scatter(market, pnl, s=12, color=BLUE, alpha=0.5)
+    grid = np.linspace(market.min(), market.max(), 100)
+    left.plot(
+        grid,
+        quadratic.coefficients["const"]
+        + quadratic.coefficients["r"] * grid
+        + quadratic.coefficients["r2"] * grid**2,
+        color="black",
+        lw=1.2,
+        ls="--",
+        label=f"quadratic fit, R2 = {quadratic.r_squared:.3f}",
+    )
+    left.set_xlabel("S&P 500 return over the window")
+    left.set_ylabel("net P&L, vol points")
+    left.set_title("Net P&L vs market return")
+    left.xaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
+    left.legend(loc="lower left", frameon=False)
+    _tidy(left)
+
+    right.scatter(surprise, pnl, s=12, color=ORANGE, alpha=0.5)
+    grid = np.linspace(surprise.min(), surprise.max(), 100)
+    right.plot(
+        grid,
+        linear.coefficients["const"] + linear.coefficients["surprise"] * grid,
+        color="black",
+        lw=1.2,
+        ls="--",
+        label=f"linear fit, R2 = {linear.r_squared:.3f}",
+    )
+    right.set_xlabel("realized - implied correlation")
+    right.set_title("Net P&L vs correlation surprise")
+    right.legend(loc="lower left", frameon=False)
+    _tidy(right)
 
     return _save(fig, path)

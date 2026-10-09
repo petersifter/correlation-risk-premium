@@ -24,12 +24,20 @@ from dispersion.strategy import (
     performance,
     trading_cost,
 )
+from dispersion.tail import (
+    crash_exposure,
+    event_table,
+    stress_buckets,
+    volatility_exposure,
+)
 
 __all__ = [
     "annualized_vol",
     "average_correlation",
     "basket_return",
     "correlation_window",
+    "crash_exposure",
+    "event_table",
     "expanding_quantile_signal",
     "forecast_regression",
     "gross_pnl",
@@ -41,6 +49,8 @@ __all__ = [
     "newey_west_mean",
     "performance",
     "realized_correlation_history",
+    "stress_buckets",
     "subsample_means",
     "trading_cost",
+    "volatility_exposure",
 ]

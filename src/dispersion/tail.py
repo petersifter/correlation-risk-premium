@@ -1,0 +1,123 @@
+"""What the dispersion P&L is exposed to.
+
+Three checks. `volatility_exposure` regresses P&L on the index volatility risk
+premium. `crash_exposure` regresses it on the market return and its square; a
+negative coefficient on the square means losses on large moves either way,
+which is what short gamma looks like. `stress_buckets` reports mean P&L by
+quintile of market return with no functional form.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from dispersion.inference import HacRegression, hac_regression, newey_west_mean
+
+__all__ = [
+    "crash_exposure",
+    "event_table",
+    "index_volatility_premium",
+    "stress_buckets",
+    "volatility_exposure",
+]
+
+
+def index_volatility_premium(history: pd.DataFrame) -> pd.Series:
+    """sigma_implied,I - sigma_realized,I in volatility points."""
+    for column in ("index_implied_vol", "index_vol"):
+        if column not in history.columns:
+            raise ValueError(f"history is missing {column!r}; run with implied=True")
+    return ((history["index_implied_vol"] - history["index_vol"]) * 100.0).rename("index_vrp")
+
+
+def volatility_exposure(pnl: pd.Series, history: pd.DataFrame) -> HacRegression:
+    """pnl_t = a + b * index_vrp_t + e_t."""
+    return hac_regression(pnl, {"index_vrp": index_volatility_premium(history)})
+
+
+def crash_exposure(pnl: pd.Series, history: pd.DataFrame) -> HacRegression:
+    """pnl_t = a + b1 * r_t + b2 * r_t^2 + e_t, r the index return over the window.
+
+    b2 < 0 is short gamma. b1 > 0 on top of it means losses are worse when the
+    market falls. Returns are in decimals, so a 10% move adds b2 * 0.01.
+    """
+    if "index_return" not in history.columns:
+        raise ValueError("history is missing 'index_return'; rebuild it with a current driver")
+
+    market = history["index_return"]
+    return hac_regression(pnl, {"market_return": market, "market_return_sq": market**2})
+
+
+def stress_buckets(pnl: pd.Series, history: pd.DataFrame, buckets: int = 5) -> pd.DataFrame:
+    """Mean P&L by quintile of market return, with Newey-West intervals."""
+    if "index_return" not in history.columns:
+        raise ValueError("history is missing 'index_return'; rebuild it with a current driver")
+
+    frame = pd.concat({"pnl": pnl, "market": history["index_return"]}, axis=1).dropna()
+    if len(frame) < buckets * 3:
+        raise ValueError(f"need at least {buckets * 3} observations for {buckets} buckets")
+
+    labels = [f"Q{i + 1}" for i in range(buckets)]
+    frame["bucket"] = pd.qcut(frame["market"], buckets, labels=labels)
+
+    rows = []
+    for label, chunk in frame.groupby("bucket", observed=True, sort=True):
+        estimate = newey_west_mean(chunk["pnl"])
+        rows.append(
+            {
+                "bucket": label,
+                "n": estimate.n_obs,
+                "market_return": float(chunk["market"].mean()),
+                "mean_pnl": estimate.mean,
+                "std_error": estimate.std_error,
+                "ci_low": estimate.mean - 1.96 * estimate.std_error,
+                "ci_high": estimate.mean + 1.96 * estimate.std_error,
+                "worst": float(chunk["pnl"].min()),
+            }
+        )
+    return pd.DataFrame(rows).set_index("bucket")
+
+
+def event_table(
+    pnl: pd.Series,
+    history: pd.DataFrame,
+    events: dict[str, str],
+) -> pd.DataFrame:
+    """Measurements for named episodes.
+
+    `events` maps a label to the formation date of the window containing the
+    episode, i.e. the month-end the position was opened, not the month the
+    market moved.
+    """
+    columns = [
+        "implied_correlation",
+        "realized_correlation",
+        "index_implied_vol",
+        "index_vol",
+        "index_return",
+    ]
+    missing = [c for c in columns if c not in history.columns]
+    if missing:
+        raise ValueError(f"history is missing {missing}")
+
+    rows = []
+    for label, date in events.items():
+        key = pd.Timestamp(date)
+        if key not in history.index:
+            raise ValueError(f"{label}: {date} is not a formation date in this history")
+        window = history.loc[key]
+        rows.append(
+            {
+                "event": label,
+                "formed": key.date(),
+                "implied_corr": window["implied_correlation"],
+                "realized_corr": window["realized_correlation"],
+                "corr_surprise": window["realized_correlation"] - window["implied_correlation"],
+                "index_iv": window["index_implied_vol"],
+                "index_rv": window["index_vol"],
+                "market_return": window["index_return"],
+                "pnl": float(pnl.get(key, np.nan)),
+            }
+        )
+    return pd.DataFrame(rows).set_index("event")
