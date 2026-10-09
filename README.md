@@ -407,3 +407,38 @@ five figures to `reports/`.
 Rebuilding needs a WRDS account with CRSP and OptionMetrics and a `.pgpass` file
 (`db.create_pgpass_file()` writes one). No licensed data is in the repo, and `data/` is
 gitignored.
+
+## Layout
+
+| file | contents |
+| --- | --- |
+| `correlation.py` | equations (1) and (2) |
+| `realized.py` | realized volatility and basket returns |
+| `data.py` | WRDS queries, point-in-time membership and weights, quoted spreads |
+| `history.py` | builds the monthly panel |
+| `inference.py` | Newey-West means and HAC regression |
+| `strategy.py` | P&L, costs, performance, the expanding-quantile signal |
+| `tail.py` | exposure regressions and the episode table |
+| `plots.py` | figures |
+| `reproduce.py` | rebuilds the panel and prints the results |
+
+## References
+
+Bakshi, G. and N. Kapadia (2003). Delta-hedged gains and the negative market volatility risk
+premium. *Review of Financial Studies* 16(2), 527-566.
+
+Cboe Global Markets (2021). *Cboe Implied Correlation Index (COR3M) White Paper*, version 1.0.5.
+
+Driessen, J., P. Maenhout and G. Vilkov (2009). The price of correlation risk: evidence from equity
+options. *Journal of Finance* 64(3), 1377-1406.
+
+Lo, A. (2002). The statistics of Sharpe ratios. *Financial Analysts Journal* 58(4), 36-52.
+
+Mincer, J. and V. Zarnowitz (1969). The evaluation of economic forecasts. In J. Mincer (ed.),
+*Economic Forecasts and Expectations*. NBER.
+
+Newey, W. and K. West (1987). A simple, positive semi-definite, heteroskedasticity and
+autocorrelation consistent covariance matrix. *Econometrica* 55(3), 703-708.
+
+Newey, W. and K. West (1994). Automatic lag selection in covariance matrix estimation. *Review of
+Economic Studies* 61(4), 631-653.
