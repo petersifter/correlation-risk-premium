@@ -30,6 +30,7 @@ __all__ = [
     "plot_premium_inference",
     "plot_realized_correlation",
     "plot_strategy_pnl",
+    "plot_tail_exposure",
 ]
 
 
@@ -499,6 +500,85 @@ def plot_strategy_pnl(history: pd.DataFrame, path: str | Path) -> Path:
         "Per unit of index vega. Costs are quoted OptionMetrics bid-ask converted to "
         "volatility points by contract vega, charged one way. Commissions and delta-hedging "
         "costs are not included, so the net shown is an upper bound.",
+        color=TEXT_SECONDARY,
+        fontsize=8.5,
+    )
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=160, facecolor=SURFACE, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def plot_tail_exposure(history: pd.DataFrame, path: str | Path) -> Path:
+    """What the strategy is actually exposed to: market moves, or correlation?
+
+    Two scatters on identical y-axes so the contrast is read directly off the page rather than off
+    two R-squared values in prose. Left is net P&L against the market's return over the window;
+    right is the same P&L against the correlation surprise. If the trade were short volatility or
+    short crash, the left panel would show the structure. It does not. The right panel does.
+    """
+    from dispersion.inference import hac_regression
+    from dispersion.strategy import net_pnl
+
+    both = history.dropna(subset=["implied_correlation", "basket_half_spread_volpts"])
+    pnl = net_pnl(both)
+    market = both["index_return"]
+    surprise = both["realized_correlation"] - both["implied_correlation"]
+
+    quadratic = hac_regression(pnl, {"r": market, "r2": market**2})
+    linear = hac_regression(pnl, {"surprise": surprise})
+
+    fig, (left, right) = plt.subplots(
+        1, 2, figsize=(12, 5.2), sharey=True, gridspec_kw={"wspace": 0.08}
+    )
+    fig.patch.set_facecolor(SURFACE)
+
+    left.scatter(market, pnl, s=16, color=SERIES_1, alpha=0.45, linewidth=0, zorder=3)
+    grid = np.linspace(market.min(), market.max(), 100)
+    left.plot(
+        grid,
+        quadratic.coefficients["const"]
+        + quadratic.coefficients["r"] * grid
+        + quadratic.coefficients["r2"] * grid**2,
+        color=TEXT_SECONDARY,
+        linewidth=1.6,
+        linestyle=(0, (4, 3)),
+        zorder=4,
+        label=f"quadratic fit, R² = {quadratic.r_squared:.3f}",
+    )
+    left.set_xlabel("market return over the window", color=TEXT_SECONDARY, fontsize=10)
+    left.set_ylabel("net P&L, volatility points", color=TEXT_SECONDARY, fontsize=10)
+    left.set_title("Not a market bet", color=TEXT_PRIMARY, fontsize=12, loc="left", pad=12)
+    left.legend(loc="lower left", frameon=False, fontsize=9, labelcolor=TEXT_SECONDARY)
+    left.xaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
+    _recede(left)
+
+    right.scatter(surprise, pnl, s=16, color=SERIES_2, alpha=0.45, linewidth=0, zorder=3)
+    grid = np.linspace(surprise.min(), surprise.max(), 100)
+    right.plot(
+        grid,
+        linear.coefficients["const"] + linear.coefficients["surprise"] * grid,
+        color=TEXT_SECONDARY,
+        linewidth=1.6,
+        linestyle=(0, (4, 3)),
+        zorder=4,
+        label=f"linear fit, R² = {linear.r_squared:.3f}",
+    )
+    # A real MINUS SIGN, not a hyphen: rendered chart text, where it is the correct glyph.
+    surprise_label = "correlation surprise (realised − implied)"  # noqa: RUF001
+    right.set_xlabel(surprise_label, color=TEXT_SECONDARY, fontsize=10)
+    right.set_title("A correlation bet", color=TEXT_PRIMARY, fontsize=12, loc="left", pad=12)
+    right.legend(loc="lower left", frameon=False, fontsize=9, labelcolor=TEXT_SECONDARY)
+    _recede(right)
+
+    fig.text(
+        0.125,
+        0.015,
+        f"{len(both)} monthly windows. The single-name leg hedges the volatility level - "
+        "index and single-name volatility risk premia correlate at +0.91 - leaving "
+        "correlation as the exposure that remains.",
         color=TEXT_SECONDARY,
         fontsize=8.5,
     )

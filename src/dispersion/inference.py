@@ -66,9 +66,11 @@ import pandas as pd
 
 __all__ = [
     "ForecastRegression",
+    "HacRegression",
     "MeanEstimate",
     "bartlett_lag_default",
     "forecast_regression",
+    "hac_regression",
     "newey_west_mean",
     "subsample_means",
 ]
@@ -186,21 +188,81 @@ def forecast_regression(
     ``realised_t = alpha + beta * implied_t + e_t``. The two series are aligned on their index and
     rows missing either side are dropped.
     """
-    frame = pd.concat({"realized": realized, "implied": implied}, axis=1).dropna()
+    fit = hac_regression(realized, {"implied": implied}, lags=lags)
+    return ForecastRegression(
+        alpha=float(fit.coefficients["const"]),
+        beta=float(fit.coefficients["implied"]),
+        alpha_std_error=float(fit.std_errors["const"]),
+        beta_std_error=float(fit.std_errors["implied"]),
+        r_squared=fit.r_squared,
+        n_obs=fit.n_obs,
+        lags=fit.lags,
+    )
+
+
+@dataclass(frozen=True)
+class HacRegression:
+    """An OLS fit with heteroskedasticity- and autocorrelation-consistent standard errors."""
+
+    coefficients: pd.Series
+    std_errors: pd.Series
+    r_squared: float
+    n_obs: int
+    lags: int
+
+    @property
+    def t_statistics(self) -> pd.Series:
+        """t-statistics against a null of zero."""
+        return (self.coefficients / self.std_errors).rename("t")
+
+    def summary(self) -> pd.DataFrame:
+        """One row per regressor: estimate, standard error, t."""
+        return pd.DataFrame(
+            {
+                "estimate": self.coefficients,
+                "std_error": self.std_errors,
+                "t": self.t_statistics,
+            }
+        )
+
+
+def hac_regression(
+    y: pd.Series,
+    regressors: dict[str, pd.Series],
+    lags: int | None = None,
+) -> HacRegression:
+    """OLS of ``y`` on ``regressors`` with a constant, using Newey-West HAC standard errors.
+
+    The single implementation of the HAC sandwich in this package. ``forecast_regression`` is a
+    named wrapper around it, and rung 6's exposure analysis uses it directly, so there is one place
+    where the covariance estimator lives and no chance of two copies drifting apart.
+
+    The covariance is ``(X'X)^-1 S (X'X)^-1`` with the Bartlett-weighted meat matrix::
+
+        S = sum_t s_t s_t' + sum_{j=1}^{L} w_j sum_t (s_t s_{t-j}' + s_{t-j} s_t'),
+        s_t = x_t e_t,    w_j = 1 - j / (L + 1)
+
+    Series are aligned on their shared index and rows missing any variable are dropped.
+    """
+    if not regressors:
+        raise ValueError("need at least one regressor")
+
+    frame = pd.concat({"__y__": y, **regressors}, axis=1).dropna()
     n = len(frame)
-    if n < 3:
+    names = list(regressors)
+    if n < len(names) + 2:
         raise ValueError(f"need at least three paired observations, got {n}")
 
     lags = bartlett_lag_default(n) if lags is None else lags
     if lags < 0 or lags >= n:
         raise ValueError(f"lags must be in [0, {n - 1}], got {lags}")
 
-    y = frame["realized"].to_numpy(dtype=float)
-    design = np.column_stack([np.ones(n), frame["implied"].to_numpy(dtype=float)])
+    target = frame["__y__"].to_numpy(dtype=float)
+    design = np.column_stack([np.ones(n), *(frame[name].to_numpy(dtype=float) for name in names)])
 
     xtx_inv = np.linalg.inv(design.T @ design)
-    coefficients = xtx_inv @ design.T @ y
-    residuals = y - design @ coefficients
+    coefficients = xtx_inv @ design.T @ target
+    residuals = target - design @ coefficients
 
     # HAC meat matrix: the Bartlett-weighted sum of lagged score cross-products.
     scores = design * residuals[:, None]
@@ -211,17 +273,13 @@ def forecast_regression(
         meat += weight * (cross + cross.T)
 
     covariance = xtx_inv @ meat @ xtx_inv
-    std_errors = np.sqrt(np.diag(covariance))
+    labels = ["const", *names]
+    centred = target - target.mean()
 
-    centred = y - y.mean()
-    r_squared = 1.0 - float(residuals @ residuals) / float(centred @ centred)
-
-    return ForecastRegression(
-        alpha=float(coefficients[0]),
-        beta=float(coefficients[1]),
-        alpha_std_error=float(std_errors[0]),
-        beta_std_error=float(std_errors[1]),
-        r_squared=r_squared,
+    return HacRegression(
+        coefficients=pd.Series(coefficients, index=labels, name="estimate"),
+        std_errors=pd.Series(np.sqrt(np.diag(covariance)), index=labels, name="std_error"),
+        r_squared=1.0 - float(residuals @ residuals) / float(centred @ centred),
         n_obs=n,
         lags=lags,
     )

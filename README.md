@@ -9,7 +9,7 @@ This repository measures that price, asks whether it is systematically too high,
 position that harvests it, and then examines what happens in the periods where the trade
 famously breaks.
 
-> **Status:** rungs 1-5 complete. Rung 6 (the tail) next.
+> **Status:** complete. All six rungs built, tested and reproducible.
 
 ## The build order
 
@@ -22,7 +22,7 @@ Each rung is completed, tested and committed before the next begins.
 | 3 | Implied correlation from the OptionMetrics surface | ✅ |
 | 4 | The premium: implied versus subsequently realised | ✅ |
 | 5 | The position: vega-weighted straddles, delta hedging, costs | ✅ |
-| 6 | The tail: February 2018, March 2020 | |
+| 6 | The tail: February 2018, March 2020 | ✅ |
 
 ## Rung 1 — the identity
 
@@ -260,10 +260,13 @@ says why — of +1.385 volatility points of average gross P&L:
 | short index (VRP captured) | **+1.374** |
 | long single names (VRP paid) | **+0.010** |
 
-Single-name options are priced close to fair on average; index options are rich. **Vega-weighted
-dispersion is overwhelmingly a short index volatility-risk-premium trade**, with the single-name leg
-acting as a hedge that is roughly free but absorbs the volatility-level risk. A study that assumed
-the P&L was the correlation premium would attribute the result to the wrong exposure.
+Single-name options are priced close to fair on average; index options are rich, so **the
+*average* P&L is the index volatility risk premium**, not the correlation premium. A study that
+assumed otherwise would attribute the result to the wrong exposure.
+
+That is a statement about the mean only. Rung 6 shows the *risk* is a different thing entirely —
+the index VRP explains just 6% of the month-to-month variation, because the single-name leg hedges
+it away.
 
 ### Costs are measured, not assumed
 
@@ -330,13 +333,115 @@ Stated because they all point the same way — the net above is an **upper bound
   interval is quoted for that reason.
 - **Two strategy variants were tried** — unconditional and conditional. Both are reported.
 
-## Reproducing
+## Rung 6 — so is it just short volatility?
 
-Data comes from WRDS (CRSP, OptionMetrics) and is licensed, so no record-level data is committed
-here. Reproducing the empirical rungs requires your own WRDS credentials; the queries used are
-documented in the code.
+![What the strategy is exposed to](reports/tail_exposure.png)
+
+The obvious challenge to rung 5, and the one an interviewer will make. A short-volatility exposure
+and a short-crash exposure look identical in a volatility-only view, because crashes are volatile.
+Separating them needs the market's **direction**, so the panel records each window's index return
+alongside its volatility.
+
+### No, and the reason is interesting
+
+| exposure tested | R² |
+| --- | --- |
+| index volatility risk premium | 0.060 |
+| market return and its square | **0.011** |
+| correlation surprise (realised − implied) | **0.422** |
+
+Despite the index VRP supplying essentially the whole *average* P&L, it explains only 6% of the
+*variation*. Those are not in conflict, and the reason is the point of the whole trade: index and
+single-name volatility risk premia correlate at **+0.911**, with a regression slope of 0.911. The
+single-name leg hedges away almost all of the common volatility level, and what survives is the
+difference — which is correlation.
+
+Market exposure is nil. The squared-return coefficient is +7.6 with t = 0.16: no short-gamma
+signature, no crash convexity. The quintile table agrees, carrying no functional-form assumption at
+all — the worst bucket by mean P&L is Q2, not the crash bucket Q1, and the worst individual months
+are scattered across every quintile.
+
+Correlation surprise, by contrast, has a slope of **−13.08** with **t = −14.0**.
+
+**The trade is short correlation, exactly as advertised.** The hedge works. That is a vindication of
+the structure and simultaneously the reason the net P&L is small and noisy rather than large: what
+is left after hedging is a thin spread between two nearly identical volatility risk premia.
+
+### The tail is a correlation event, not a market event
+
+| episode | formed | implied ρ | realised ρ | surprise | market | net P&L |
+| --- | --- | --- | --- | --- | --- | --- |
+| LTCM / Russia | 1998-07-31 | 0.455 | 0.526 | +0.07 | −14.6% | −0.42 |
+| Lehman | 2008-09-30 | 0.606 | 0.762 | +0.16 | −20.3% | −3.32 |
+| Euro crisis | 2011-07-29 | 0.764 | 0.930 | +0.17 | −6.4% | −2.52 |
+| China devaluation | 2015-07-31 | 0.333 | 0.658 | +0.33 | −6.3% | −2.30 |
+| **Volmageddon** | 2018-01-31 | 0.183 | 0.560 | **+0.38** | −4.7% | **−6.06** |
+| Covid | 2020-02-28 | 0.728 | 0.849 | +0.12 | −11.1% | −2.53 |
+
+Every one is a loss, and in every one realised correlation exceeded implied. But look at the two
+right-hand columns together: the **worst** month is February 2018, which had the **mildest** market
+decline of the six at −4.7%. Lehman's −20.3% produced roughly half the loss.
+
+Severity tracks the correlation surprise, not the market move. A dispersion book is not destroyed
+by a crash — it is destroyed by correlation going to one, which a crash usually causes but does not
+have to.
+
+## What this repository demonstrates
+
+Written down because the result is negative, and a negative result is only worth reading if the
+method is the point.
+
+1. **A question with a real answer, not a strategy pitch.** "Is the correlation risk premium still
+   there, and can it be traded?" Yes, no, and the reasons are specific: the premium has decayed by
+   three quarters since the 1990s, and bid-ask consumes 98% of what remains.
+2. **Institutional data handled correctly.** CRSP and OptionMetrics joined through the WRDS link
+   table, point-in-time index membership, matched price returns on both legs, and a measured
+   bid-ask rather than an assumed one.
+3. **Bias control as the structure of the work, not a disclaimer.** Baskets are formed before the
+   window they are measured over, and the size of the bias from doing it the other way is measured
+   (+0.0038, in 53 of 53 windows) rather than asserted to be small. A full-sample quantile that
+   leaked into the conditional variant was caught and is documented along with what it cost.
+4. **Costs and inference that survive scrutiny.** Newey-West standard errors implemented directly
+   and checked against `statsmodels`; Sharpe ratios quoted with standard errors; a bootstrap
+   interval because the returns are fat-tailed.
+5. **Reproducibility.** Every figure and every number quoted below is regenerated by one command.
+   The test suite runs on synthetic fixtures, so the mathematics is auditable with no WRDS
+   subscription at all.
+
+What it is not: a profitable strategy, or an argument that one exists. The most useful sentence in
+it is that a textbook trade stopped clearing its own transaction costs around 2005.
+
+## Reproducing
 
 ```bash
 uv sync
-uv run pytest
+uv run pytest                                # 108 tests, no credentials needed
+uv run dispersion-reproduce                  # rebuild from WRDS, then draw everything
+uv run dispersion-reproduce --from-cache     # redraw from the saved panel
 ```
+
+`dispersion-reproduce` prints every statistic quoted above, in the order it appears, and writes all
+five figures to `reports/`. Nothing in this README is a number I typed by hand.
+
+The test suite is the part that needs no subscription. Every fixture is synthetic, so the identity,
+the estimators and the no-lookahead properties can all be verified by anyone — only the empirical
+sections need WRDS.
+
+Data comes from CRSP and OptionMetrics through WRDS and is licensed, so no record-level data is
+committed here, and the derived panel under `data/` is gitignored too. The exact tables, columns
+and queries are documented in `data.py`. You will need a WRDS account with CRSP and OptionMetrics
+entitlements, and a `.pgpass` file — create one once with `db.create_pgpass_file()`.
+
+### Layout
+
+| | |
+| --- | --- |
+| `correlation.py` | the variance identity (rung 1) |
+| `realized.py` | volatility primitives shared by both measurements |
+| `data.py` | WRDS access, point-in-time membership, weights, quoted spreads |
+| `history.py` | the monthly driver producing the panel |
+| `inference.py` | Newey-West means and HAC regression (rung 4) |
+| `strategy.py` | the position, its P&L and its costs (rung 5) |
+| `tail.py` | exposure analysis and the episodes (rung 6) |
+| `plots.py` | the five figures |
+| `reproduce.py` | regenerates all of it |

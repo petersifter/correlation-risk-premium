@@ -315,6 +315,8 @@ def realized_correlation_history(
     # ISO strings rather than Timestamps: these ride along in DataFrame.attrs, and pandas
     # serialises attrs to JSON when writing parquet, where a Timestamp raises.
     skipped: list[tuple[str, str]] = []
+    # Windows that exist but lack the implied leg, kept apart from windows that do not exist.
+    partial: list[tuple[str, str]] = []
 
     for block_start in range(0, len(formation_dates), chunk_years * 12):
         block = formation_dates[block_start : block_start + chunk_years * 12]
@@ -390,6 +392,11 @@ def realized_correlation_history(
                 "formation_date": as_of,
                 "window_end": forward_dates[-1],
                 "dropped_at_formation": dropped,
+                # The index's compounded return over the same window. Volatility says how far the
+                # market moved; this says which way. Rung 6 needs both to separate a short
+                # volatility exposure from a short crash exposure, which look identical in a
+                # volatility-only view.
+                "index_return": float((1.0 + index_returns.loc[forward_dates]).prod() - 1.0),
                 **measured,
             }
 
@@ -400,7 +407,11 @@ def realized_correlation_history(
                 try:
                     row.update(implied_correlation_on(db, as_of, weights, days=implied_days))
                 except InsufficientData as exc:
-                    skipped.append((as_of.strftime("%Y-%m-%d"), f"implied leg unavailable: {exc}"))
+                    # The window still exists and its realised measurement is kept; only the
+                    # implied columns are absent. Tracked separately from a skipped window,
+                    # because conflating the two double-counts the row and misdescribes it -
+                    # every month before OptionMetrics begins lands here.
+                    partial.append((as_of.strftime("%Y-%m-%d"), str(exc)))
 
             rows.append(row)
 
@@ -409,14 +420,23 @@ def realized_correlation_history(
 
     history = pd.DataFrame(rows).set_index("formation_date").sort_index()
     history.attrs["skipped_windows"] = skipped
+    history.attrs["windows_without_implied"] = partial
 
-    # A silently short history is indistinguishable from a correct one, so say so. Every skip here
-    # is an expected shortage; pipeline defects raise instead of landing in this list.
+    # A silently short history is indistinguishable from a correct one, so say so. Everything
+    # reported here is an expected shortage; pipeline defects raise rather than landing in a list.
     if skipped:
         warnings.warn(
-            f"{len(skipped)} of {len(skipped) + len(rows)} month-ends produced no window; "
+            f"{len(skipped)} of {len(skipped) + len(rows)} month-ends produced no window at all; "
             f"first: {skipped[0][0]} ({skipped[0][1]}). "
             "The full list is in the result's .attrs['skipped_windows'].",
+            UserWarning,
+            stacklevel=2,
+        )
+    if partial:
+        warnings.warn(
+            f"{len(partial)} of {len(rows)} windows have a realised measurement but no implied "
+            f"leg; first: {partial[0][0]} ({partial[0][1]}). "
+            "The full list is in the result's .attrs['windows_without_implied'].",
             UserWarning,
             stacklevel=2,
         )
