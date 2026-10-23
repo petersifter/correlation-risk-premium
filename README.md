@@ -10,8 +10,6 @@ This repo measures implied and realized correlation monthly from 1990 to 2024 on
 S&P 500 stocks, tests whether implied correlation has been too high, and prices the dispersion
 trade using the bid-ask spreads that were actually quoted on the options it would have traded.
 
-Summary:
-
 - Implied correlation averaged 0.418 and subsequently realized correlation 0.346 over 346 monthly
   windows (1996-2024). The gap of 0.072 has a Newey-West t-statistic of 7.74 and was positive in
   72% of months.
@@ -96,25 +94,25 @@ The 73 windows before OptionMetrics starts in 1996 have only the realized leg.
 
 ## Measurement choices
 
-**Volatility isn't demeaned.** Realized volatility is $\sqrt{252 \cdot \overline{r^2}}$. Over 21
+Volatility isn't demeaned. Realized volatility is $\sqrt{252 \cdot \overline{r^2}}$. Over 21
 days the sample mean is mostly noise, implied volatility contains no drift, and variance swaps
 settle the same way. It also means the raw second-moment matrix is a valid covariance matrix, so a
 basket rebuilt from its own constituents satisfies (1) exactly, which the tests check at zero
 tolerance.
 
-**Price returns on both legs.** SPX options are on the price index, so the index leg uses `sprtrn`
+Price returns on both legs. SPX options are on the price index, so the index leg uses `sprtrn`
 and the constituents use `retx`.
 
-**The index leg is the real index.** A basket built from its own constituents satisfies (1) by
+The index leg is the real index. A basket built from its own constituents satisfies (1) by
 construction and tells you nothing. The measurement uses the actual S&P 500 return, and the
 difference from the basket is kept per window as a basis.
 
-**Baskets are formed before the window.** Taking end-of-month membership and measuring the
+Baskets are formed before the window. Taking end-of-month membership and measuring the
 month just gone conditions on which names survived it. I measured the size of that: forming each
 basket at the end of its window instead raised mean correlation by 0.0038 in all 53 windows from
 2008 to 2012, and hid two of the three names that dropped out.
 
-**Dropped names are counted.** A name with no usable market cap at formation, or gaps in its
+Dropped names are counted. A name with no usable market cap at formation, or gaps in its
 returns over the window, is dropped and the weights renormalized. Both counts are stored with
 every window.
 
@@ -292,7 +290,7 @@ The spread takes 98% of the gross.
 | block bootstrap 95% CI for the mean | -0.383 to +0.489 |
 
 The returns are skewed and fat-tailed, so I report a moving-block bootstrap (6-month blocks,
-10,000 draws) next to the Newey-West t-statistic. They agree.
+10,000 draws) next to the Newey-West t-statistic. Both intervals comfortably include zero.
 
 | period | gross | cost | net |
 | --- | --- | --- | --- |
@@ -339,7 +337,7 @@ single-name volatility premia have a correlation of 0.911 (slope 0.911, $R^2$ 0.
 single-name leg hedges out most of the volatility level and what's left is the gap between two
 premia that move together, which is correlation.
 
-There's no market exposure:
+The crash regression finds no market exposure:
 
 | | estimate | HAC se | t |
 | --- | --- | --- | --- |
@@ -374,8 +372,8 @@ five. The correlation surprise has a slope of -13.08 (t = -14.0).
 
 All six lost money and in all six realized correlation came in above implied. The worst was
 February 2018, which had the smallest market drop of the six (-4.7%) and the largest correlation
-surprise; Lehman, at -20.3%, lost about half as much. The losses line up with the correlation
-surprise, not the size of the crash.
+surprise; Lehman, at -20.3%, lost about half as much. The size of each loss lines up with the
+correlation surprise more closely than with the market's fall.
 
 ## Limitations
 
@@ -408,8 +406,8 @@ coverage, the survivorship comparison, the call/put gap, SPX gaps, the vega chec
 bootstrap) were one-off WRDS queries and aren't part of it.
 
 Rebuilding needs a WRDS account with CRSP and OptionMetrics and a `.pgpass` file
-(`db.create_pgpass_file()` writes one). No licensed data is in the repo, and `data/` is
-gitignored.
+(`db.create_pgpass_file()` writes one). The code is MIT-licensed. The CRSP and OptionMetrics
+data is licensed through WRDS and isn't in the repo; `data/` is gitignored.
 
 ## Layout
 

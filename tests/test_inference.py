@@ -141,7 +141,7 @@ def test_block_bootstrap_brackets_the_mean():
     assert low < series.mean() < high
 
 
-def test_block_bootstrap_wider_than_iid_under_persistence():
+def test_block_bootstrap_wider_than_iid():
     series = ar1(400, rho=0.8)
     iid_low, iid_high = block_bootstrap_mean(series, block=1, draws=4_000)
     blk_low, blk_high = block_bootstrap_mean(series, block=12, draws=4_000)

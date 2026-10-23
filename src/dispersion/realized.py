@@ -18,18 +18,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-__all__ = [
-    "TRADING_DAYS_PER_YEAR",
-    "annualized_vol",
-    "basket_return",
-]
-
 TRADING_DAYS_PER_YEAR = 252
 
 
 def _require_complete(frame: pd.DataFrame | pd.Series, name: str) -> None:
     if frame.isna().to_numpy().any():
-        raise ValueError(f"{name} contains NaN; drop or fill missing names before calling")
+        raise ValueError(f"{name} contains NaN")
 
 
 def annualized_vol(
@@ -58,14 +52,12 @@ def basket_return(component_returns: pd.DataFrame, weights: pd.Series) -> pd.Ser
     if not component_returns.columns.equals(weights.index):
         raise ValueError("component_returns columns and weights index must match exactly")
     if component_returns.shape[1] < 2:
-        raise ValueError("need at least two constituents; correlation is undefined for one")
+        raise ValueError("need at least two constituents")
 
     _require_complete(component_returns, "component_returns")
     _require_complete(weights, "weights")
 
     if abs(float(weights.sum()) - 1.0) > 1e-8:
-        raise ValueError(
-            f"weights must sum to 1, got {float(weights.sum()):.10g}; renormalize before calling"
-        )
+        raise ValueError(f"weights must sum to 1, got {float(weights.sum()):.10g}")
 
     return (component_returns * weights).sum(axis=1)

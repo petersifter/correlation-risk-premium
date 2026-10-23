@@ -28,24 +28,13 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-__all__ = [
-    "Performance",
-    "expanding_quantile_signal",
-    "gross_pnl",
-    "net_pnl",
-    "performance",
-    "trading_cost",
-]
-
 MONTHS_PER_YEAR = 12
 
 
 def _require_columns(history: pd.DataFrame, columns: list[str]) -> None:
     missing = [c for c in columns if c not in history.columns]
     if missing:
-        raise ValueError(
-            f"history is missing {missing}; run realized_correlation_history with implied=True"
-        )
+        raise ValueError(f"history is missing {missing} (build it with implied=True)")
 
 
 def gross_pnl(history: pd.DataFrame) -> pd.Series:

@@ -59,7 +59,7 @@ def test_correlation_drop_pays():
     assert float(gross_pnl(history).iloc[0]) == pytest.approx(4.0)
 
 
-def test_loses_when_all_vol_falls_even_if_correlation_falls():
+def test_all_vol_falling_loses():
     # Index/single ratio falls from 0.667 to 0.600, but the long leg loses 10 points
     # and the short leg only makes 8.
     history = pd.DataFrame(

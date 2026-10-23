@@ -14,14 +14,6 @@ from dispersion.strategy import gross_pnl, net_pnl, trading_cost
 
 BLUE, ORANGE, GREY = "tab:blue", "tab:orange", "grey"
 
-__all__ = [
-    "plot_correlation_premium",
-    "plot_premium_inference",
-    "plot_realized_correlation",
-    "plot_strategy_pnl",
-    "plot_tail_exposure",
-]
-
 
 def _tidy(ax: plt.Axes) -> None:
     ax.grid(True, alpha=0.3)

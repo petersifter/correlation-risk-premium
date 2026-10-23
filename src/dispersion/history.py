@@ -40,12 +40,6 @@ from dispersion.data import (
 )
 from dispersion.realized import TRADING_DAYS_PER_YEAR, annualized_vol, basket_return
 
-__all__ = [
-    "correlation_window",
-    "implied_correlation_on",
-    "realized_correlation_history",
-]
-
 
 def correlation_window(
     window_returns: pd.DataFrame,
@@ -66,9 +60,8 @@ def correlation_window(
     missing = weights.index.difference(window_returns.columns)
     if not missing.empty:
         raise ValueError(
-            f"{len(missing)} weighted name(s) are absent from window_returns entirely, e.g. "
-            f"{list(missing[:3])}. Fetch the union of members across the whole period, not the "
-            "members as of a single date"
+            f"{len(missing)} weighted name(s) absent from window_returns entirely, e.g. "
+            f"{list(missing[:3])}"
         )
     if not index_window_returns.index.equals(window_returns.index):
         raise ValueError("index and constituent windows must cover exactly the same dates")
@@ -78,8 +71,7 @@ def correlation_window(
         n_missing = int(index_window_returns.isna().sum())
         raise ValueError(
             f"index_window_returns has {n_missing} missing observation(s) out of "
-            f"{len(index_window_returns)}; volatility would be annualized over a different number "
-            "of days than the constituents"
+            f"{len(index_window_returns)}"
         )
 
     candidates = window_returns[weights.index]
@@ -88,8 +80,7 @@ def correlation_window(
 
     if len(usable) < 2:
         raise InsufficientData(
-            f"only {len(usable)} name(s) have complete returns over the window; correlation needs "
-            "two"
+            f"only {len(usable)} name(s) with complete returns, correlation needs two"
         )
 
     renormalized = weights[usable] / weights[usable].sum()

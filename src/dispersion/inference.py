@@ -17,18 +17,6 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-__all__ = [
-    "ForecastRegression",
-    "HacRegression",
-    "MeanEstimate",
-    "bartlett_lag_default",
-    "block_bootstrap_mean",
-    "forecast_regression",
-    "hac_regression",
-    "newey_west_mean",
-    "subsample_means",
-]
-
 
 def bartlett_lag_default(n_obs: int) -> int:
     """Newey-West (1994) automatic lag, floor(4 (T/100)^(2/9)), at least 1."""
@@ -79,10 +67,7 @@ def newey_west_mean(series: pd.Series, lags: int | None = None) -> MeanEstimate:
 
     long_run = _bartlett_long_run_variance(values, lags)
     if long_run <= 0.0:
-        raise ValueError(
-            f"long-run variance estimate is {long_run:.6g}, which is not positive; the Bartlett "
-            "kernel should prevent this, so suspect a degenerate series"
-        )
+        raise ValueError(f"long-run variance is {long_run:.6g}, not positive")
 
     mean = float(values.mean())
     std_error = float(np.sqrt(long_run / n))

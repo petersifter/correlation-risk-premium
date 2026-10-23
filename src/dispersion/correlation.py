@@ -24,12 +24,6 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-__all__ = [
-    "average_correlation",
-    "index_variance",
-    "index_vol_from_average_correlation",
-]
-
 _WEIGHT_TOLERANCE = 1e-8
 
 
@@ -43,11 +37,11 @@ def _validate(weights: ArrayLike, component_vols: ArrayLike) -> tuple[NDArray, N
     if w.shape != sigma.shape:
         raise ValueError(f"weights has length {w.size} but component_vols has length {sigma.size}")
     if w.size < 2:
-        raise ValueError("need at least two constituents; correlation is undefined for one")
+        raise ValueError("need at least two constituents")
     if np.any(sigma < 0):
         raise ValueError("component_vols must be non-negative")
     if abs(w.sum() - 1.0) > _WEIGHT_TOLERANCE:
-        raise ValueError(f"weights must sum to 1, got {w.sum():.10g}; renormalize before calling")
+        raise ValueError(f"weights must sum to 1, got {w.sum():.10g}")
     return w, sigma
 
 
@@ -85,10 +79,7 @@ def index_vol_from_average_correlation(
     variance = diagonal + rho_bar * (weighted_avg_vol**2 - diagonal)
 
     if variance < 0.0:
-        raise ValueError(
-            f"rho_bar={rho_bar:.6g} implies a negative index variance; no covariance matrix with "
-            "this average correlation exists for these weights and volatilities"
-        )
+        raise ValueError(f"rho_bar={rho_bar:.6g} implies a negative index variance")
     return float(np.sqrt(variance))
 
 
@@ -110,8 +101,5 @@ def average_correlation(
     off_diagonal = weighted_avg_vol**2 - diagonal
 
     if off_diagonal <= 0.0:
-        raise ValueError(
-            "the off-diagonal term A^2 - B is not positive, so average correlation is undefined; "
-            "this happens when all weight sits on one name or every volatility is zero"
-        )
+        raise ValueError("A^2 - B is not positive, so average correlation is undefined")
     return (index_vol**2 - diagonal) / off_diagonal

@@ -14,20 +14,12 @@ import pandas as pd
 
 from dispersion.inference import HacRegression, hac_regression, newey_west_mean
 
-__all__ = [
-    "crash_exposure",
-    "event_table",
-    "index_volatility_premium",
-    "stress_buckets",
-    "volatility_exposure",
-]
-
 
 def index_volatility_premium(history: pd.DataFrame) -> pd.Series:
     """sigma_implied,I - sigma_realized,I in volatility points."""
     for column in ("index_implied_vol", "index_vol"):
         if column not in history.columns:
-            raise ValueError(f"history is missing {column!r}; run with implied=True")
+            raise ValueError(f"history is missing {column!r} (build it with implied=True)")
     return ((history["index_implied_vol"] - history["index_vol"]) * 100.0).rename("index_vrp")
 
 
@@ -43,7 +35,7 @@ def crash_exposure(pnl: pd.Series, history: pd.DataFrame) -> HacRegression:
     market falls. Returns are in decimals, so a 10% move adds b2 * 0.01.
     """
     if "index_return" not in history.columns:
-        raise ValueError("history is missing 'index_return'; rebuild it with a current driver")
+        raise ValueError("history is missing 'index_return'")
 
     market = history["index_return"]
     return hac_regression(pnl, {"market_return": market, "market_return_sq": market**2})
@@ -52,7 +44,7 @@ def crash_exposure(pnl: pd.Series, history: pd.DataFrame) -> HacRegression:
 def stress_buckets(pnl: pd.Series, history: pd.DataFrame, buckets: int = 5) -> pd.DataFrame:
     """Mean P&L by quintile of market return, with Newey-West intervals."""
     if "index_return" not in history.columns:
-        raise ValueError("history is missing 'index_return'; rebuild it with a current driver")
+        raise ValueError("history is missing 'index_return'")
 
     frame = pd.concat({"pnl": pnl, "market": history["index_return"]}, axis=1).dropna()
     if len(frame) < buckets * 3:

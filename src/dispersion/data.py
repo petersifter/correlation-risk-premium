@@ -29,22 +29,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-__all__ = [
-    "REQUIRED_TABLES",
-    "InsufficientData",
-    "connect",
-    "fetch_atm_implied_vols",
-    "fetch_atm_quote_spreads",
-    "fetch_index_membership",
-    "fetch_index_returns",
-    "fetch_optionmetrics_link",
-    "fetch_stock_panel",
-    "formation_weights",
-    "members_on",
-    "query",
-    "verify_schema",
-]
-
 
 class InsufficientData(ValueError):
     """Not enough usable names to measure a window.
@@ -207,7 +191,7 @@ def formation_weights(
         caps = caps.nlargest(top_n)
     if caps.size < 2:
         raise InsufficientData(
-            f"only {caps.size} constituent(s) usable on {as_of.date()}; correlation needs two"
+            f"only {caps.size} usable constituent(s) on {as_of.date()}, correlation needs two"
         )
 
     return caps / caps.sum(), dropped
@@ -240,7 +224,7 @@ def fetch_optionmetrics_link(db: Any, permnos: list[int], as_of: str) -> pd.Seri
     if not duplicated.empty:
         raise ValueError(
             f"{duplicated.nunique()} secid(s) map to more than one permno on {as_of}: "
-            f"{sorted(duplicated.unique())[:3]}. Resolve the link before pricing the basket"
+            f"{sorted(duplicated.unique())[:3]}"
         )
     return mapped
 
