@@ -289,9 +289,10 @@ The spread takes 98% of the gross.
 | cumulative | +10.5 |
 | skew | 0.89 |
 | excess kurtosis | 2.33 |
-| bootstrap 95% CI for the mean | -0.263 to +0.322 |
+| block bootstrap 95% CI for the mean | -0.383 to +0.489 |
 
-The returns are skewed and fat-tailed, so a bootstrap interval is given next to the t-statistic.
+The returns are skewed and fat-tailed, so I report a moving-block bootstrap (6-month blocks,
+10,000 draws) next to the Newey-West t-statistic. They agree.
 
 | period | gross | cost | net |
 | --- | --- | --- | --- |
@@ -309,7 +310,7 @@ quartile.
 
 | threshold | windows | mean net | Sharpe |
 | --- | --- | --- | --- |
-| full-sample quartile | 87 | 0.245 | 0.28 |
+| full-sample quartile | 87 | 0.245 | 0.28 +/- 0.38 |
 | expanding quartile, past data only | 85 | -0.266 | -0.38 +/- 0.39 |
 
 The full-sample quartile uses information nobody had in 1996. With a threshold built only from
@@ -343,8 +344,8 @@ There's no market exposure:
 | | estimate | HAC se | t |
 | --- | --- | --- | --- |
 | constant | -0.038 | 0.243 | -0.16 |
-| market return | 6.336 | 4.709 | 1.35 |
-| market return squared | 7.602 | 46.792 | 0.16 |
+| market return | 6.341 | 4.709 | 1.35 |
+| market return squared | 7.611 | 46.794 | 0.16 |
 
 Short gamma would show up as a negative coefficient on the squared term. By quintile of the
 market return, with no functional form:
@@ -401,8 +402,10 @@ uv run dispersion-reproduce --username YOU      # rebuild from WRDS
 uv run dispersion-reproduce --from-cache        # reuse data/processed/
 ```
 
-`dispersion-reproduce` prints the statistics quoted above, in the order they appear, and writes the
-five figures to `reports/`.
+`dispersion-reproduce` prints the numbers in the results sections in README order and writes the
+five figures to `reports/`. The data checks in the Data and Measurement choices sections (link
+coverage, the survivorship comparison, the call/put gap, SPX gaps, the vega check, the single-window
+bootstrap) were one-off WRDS queries and aren't part of it.
 
 Rebuilding needs a WRDS account with CRSP and OptionMetrics and a `.pgpass` file
 (`db.create_pgpass_file()` writes one). No licensed data is in the repo, and `data/` is
@@ -416,7 +419,7 @@ gitignored.
 | `realized.py` | realized volatility and basket returns |
 | `data.py` | WRDS queries, point-in-time membership and weights, quoted spreads |
 | `history.py` | builds the monthly panel |
-| `inference.py` | Newey-West means and HAC regression |
+| `inference.py` | Newey-West means, HAC regression, block bootstrap |
 | `strategy.py` | P&L, costs, performance, the expanding-quantile signal |
 | `tail.py` | exposure regressions and the episode table |
 | `plots.py` | figures |
