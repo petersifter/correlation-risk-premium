@@ -1,16 +1,3 @@
-"""Realized volatility and basket returns.
-
-Volatility is not demeaned: sigma = sqrt(mean(r^2) * 252). Over 21 days the
-sample mean is mostly noise, and implied volatility has no drift in it either,
-so this keeps the two sides comparable. It is also what variance swaps settle
-on. A side effect used in the tests: the matrix of raw second moments is itself
-a valid covariance matrix, so a basket built from its own constituents
-satisfies equation (1) in correlation.py exactly.
-
-Both functions reject NaN. Whether to drop or fill a missing name is decided by
-the caller, where the count can be recorded.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -32,12 +19,7 @@ def annualized_vol(
     demean: bool = False,
     trading_days: int = TRADING_DAYS_PER_YEAR,
 ) -> Any:
-    """sqrt(mean(r^2) * trading_days), or the sample standard deviation if `demean`.
-
-    One value per column for a DataFrame, a float for a Series. Typed as Any
-    because pandas has no stubs installed here, so a union would only get in
-    the way.
-    """
+    """Not demeaned by default, matching implied vol and variance-swap conventions."""
     _require_complete(returns, "returns")
 
     variance = returns.var(ddof=1) if demean else (returns**2).mean()
@@ -46,7 +28,6 @@ def annualized_vol(
 
 
 def basket_return(component_returns: pd.DataFrame, weights: pd.Series) -> pd.Series:
-    """R_B = sum_i w_i R_i, with weights indexed by the return columns."""
     if not isinstance(weights, pd.Series):
         raise TypeError("weights must be a Series indexed by the component columns")
     if not component_returns.columns.equals(weights.index):

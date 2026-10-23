@@ -1,5 +1,3 @@
-"""correlation_window on synthetic returns. The driver around it needs WRDS."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -31,7 +29,6 @@ def weights() -> pd.Series:
 
 
 def index_series(window_returns: pd.DataFrame, weights: pd.Series) -> pd.Series:
-    """Stand-in for sprtrn, 5% off the basket so the basis isn't zero."""
     return (window_returns * weights).sum(axis=1) * 1.05
 
 
@@ -53,7 +50,6 @@ def test_output_fields(window_returns, weights):
 
 
 def test_basket_correlation_exact(window_returns, weights):
-    # With raw second moments the basket satisfies equation (1) to rounding error.
     result = correlation_window(window_returns, index_series(window_returns, weights), weights)
 
     observations = window_returns.to_numpy()
@@ -94,7 +90,6 @@ def test_incomplete_name_dropped(window_returns, weights):
     assert result["incomplete_in_window"] == 1
     assert result["n_names"] == 3
 
-    # 0.4/0.3/0.1 renormalize to 0.5/0.375/0.125.
     survivors = [10001, 10002, 10004]
     renormalized = weights[survivors] / weights[survivors].sum()
     vols = np.sqrt((window_returns[survivors] ** 2).mean() * TRADING_DAYS_PER_YEAR)
@@ -102,7 +97,6 @@ def test_incomplete_name_dropped(window_returns, weights):
 
 
 def test_unfetched_name_raises(window_returns, weights):
-    # A weighted name with no column at all means the wrong members were fetched.
     extended = pd.concat([weights, pd.Series([0.05], index=[99999])])
     extended = extended / extended.sum()
 
@@ -146,7 +140,6 @@ def test_index_gap_rejected(window_returns, weights):
 
 
 def test_shortage_vs_defect_exception_types(window_returns, weights):
-    # The driver skips InsufficientData and must not catch the others.
     holed = window_returns.copy()
     for permno in [10002, 10003, 10004]:
         holed.iloc[5:, holed.columns.get_loc(permno)] = np.nan

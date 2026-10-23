@@ -1,23 +1,3 @@
-"""The monthly correlation panel.
-
-On each formation date t (the last trading day of a month) the basket is fixed
-from index membership and market-cap weights as of t, then held for the next
-`window` trading days, over which volatilities are measured. Forming the basket
-at the end of the window instead would use knowledge of which names survived
-it; on 2008-2012 that raises mean realized correlation by 0.0038, in 53 of 53
-windows.
-
-Each window carries two index volatilities. `index_vol` is from CRSP's sprtrn,
-the actual S&P 500, and is the measurement. `basket_vol` is from the basket's
-own weighted return, against which equation (1) in correlation.py holds
-exactly. `basis = index_vol - basket_vol` is the tracking error of a top-50,
-market-cap-weighted proxy.
-
-Two counts are kept per window: `dropped_at_formation` (members with no usable
-market cap on t) and `incomplete_in_window` (weighted names whose forward
-returns have gaps, usually because they were acquired or delisted mid-window).
-"""
-
 from __future__ import annotations
 
 import warnings
@@ -48,13 +28,6 @@ def correlation_window(
     *,
     trading_days: int = TRADING_DAYS_PER_YEAR,
 ) -> dict[str, float | int]:
-    """Measure one held window. No data access.
-
-    `window_returns` has dates on the index and permnos as columns;
-    `index_window_returns` covers the same dates; `weights` is the formation-date
-    basket. Names with gaps in the window are dropped, the rest renormalized,
-    and the number dropped is returned.
-    """
     if not isinstance(weights, pd.Series):
         raise TypeError("weights must be a Series indexed by permno")
     missing = weights.index.difference(window_returns.columns)
@@ -65,8 +38,6 @@ def correlation_window(
         )
     if not index_window_returns.index.equals(window_returns.index):
         raise ValueError("index and constituent windows must cover exactly the same dates")
-    # Constituents with gaps are filtered below; the index has no such filter, and mean()
-    # would skip a NaN and annualize the index over fewer days than the constituents.
     if index_window_returns.isna().any():
         n_missing = int(index_window_returns.isna().sum())
         raise ValueError(
@@ -116,13 +87,6 @@ def implied_correlation_on(
     *,
     days: int = 30,
 ) -> dict[str, float | int]:
-    """Implied correlation on `as_of` for the same basket as the realized leg.
-
-    Same names and weights, only the volatilities differ, so the top-50 proxy
-    error is common to both legs. Names with no OptionMetrics link or no surface
-    on the date are dropped and the rest renormalized. Also returns quoted
-    half-spreads for the basket and the index, and the median cost tenor.
-    """
     as_of_str = as_of.strftime("%Y-%m-%d")
     link = fetch_optionmetrics_link(db, list(weights.index), as_of_str)
     if link.empty:
@@ -136,7 +100,6 @@ def implied_correlation_on(
 
     index_iv = float(surface.loc[SPX_SECID, "atm_vol"])
     if not index_iv > 0:
-        # SPX sometimes has a surface row with a NULL vol (late July / early August 2020).
         raise InsufficientData(
             f"SPX has a surface row on {as_of.date()} but no usable ATM volatility"
         )
@@ -160,7 +123,6 @@ def implied_correlation_on(
         .mean()
     )
 
-    # Names with no two-sided quote are left out of the weighted cost and counted.
     spread_table = fetch_atm_quote_spreads(db, [*usable.to_numpy().tolist(), SPX_SECID], as_of_str)
     spreads = (
         spread_table["half_spread_volpts"] if not spread_table.empty else pd.Series(dtype=float)
@@ -206,12 +168,6 @@ def realized_correlation_history(
     implied_days: int = 30,
     verbose: bool = False,
 ) -> pd.DataFrame:
-    """One row per formation date in [start, end].
-
-    Daily data is fetched `chunk_years` at a time, for the union of members over
-    every formation date in the block (members as of one date would miss names
-    that left mid-block), plus enough extra days for the last window.
-    """
     if window < 2:
         raise ValueError(f"window must be at least 2, got {window}")
 
@@ -220,7 +176,6 @@ def realized_correlation_history(
         raise ValueError(f"no index returns between {start} and {end}")
 
     calendar = index_returns.index
-    # Last trading day of each month, excluding months with no room for a full forward window.
     month_ends = pd.Series(calendar, index=calendar).resample("ME").last().dropna()
     formation_dates = [
         d for d in month_ends if calendar.get_indexer([d])[0] + window < len(calendar)
@@ -228,9 +183,7 @@ def realized_correlation_history(
 
     membership = fetch_index_membership(db, start, end)
     rows: list[dict[str, Any]] = []
-    # ISO strings: attrs go to JSON when the panel is written to parquet.
     skipped: list[tuple[str, str]] = []
-    # Windows with a realized leg but no implied leg.
     partial: list[tuple[str, str]] = []
 
     for block_start in range(0, len(formation_dates), chunk_years * 12):
@@ -242,7 +195,6 @@ def realized_correlation_history(
         for as_of in block:
             union.update(members_on(membership, as_of))
 
-        # About 1.45 calendar days per trading day; 2 plus a week is plenty.
         buffer_days = int(window * 2.0) + 7
         fetch_start = block[0].strftime("%Y-%m-%d")
         fetch_end = (block[-1] + pd.Timedelta(days=buffer_days)).strftime("%Y-%m-%d")
@@ -250,7 +202,6 @@ def realized_correlation_history(
         panel = fetch_stock_panel(db, sorted(union), fetch_start, fetch_end)
         if panel.empty:
             continue
-        # pivot raises on a duplicate (date, permno); pivot_table would average it away.
         wide_returns = panel.pivot(  # noqa: PD010
             index="date", columns="permno", values="retx"
         )
@@ -262,7 +213,6 @@ def realized_correlation_history(
             )
 
         for as_of in block:
-            # Full membership, so a member missing from the fetch is counted as dropped.
             members = members_on(membership, as_of)
 
             try:
@@ -292,7 +242,6 @@ def realized_correlation_history(
                     trading_days=trading_days,
                 )
             except InsufficientData as exc:
-                # Any other ValueError is a pipeline bug and propagates.
                 skipped.append((as_of.strftime("%Y-%m-%d"), str(exc)))
                 continue
 
@@ -300,7 +249,6 @@ def realized_correlation_history(
                 "formation_date": as_of,
                 "window_end": forward_dates[-1],
                 "dropped_at_formation": dropped,
-                # Compounded index return over the window, for the crash regressions in tail.py.
                 "index_return": float((1.0 + index_returns.loc[forward_dates]).prod() - 1.0),
                 **measured,
             }
@@ -309,7 +257,6 @@ def realized_correlation_history(
                 try:
                     row.update(implied_correlation_on(db, as_of, weights, days=implied_days))
                 except InsufficientData as exc:
-                    # Keep the realized row; every month before 1996 ends up here.
                     partial.append((as_of.strftime("%Y-%m-%d"), str(exc)))
 
             rows.append(row)

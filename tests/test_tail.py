@@ -1,5 +1,3 @@
-"""Exposure regressions on P&L series built with a known exposure."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -63,8 +61,6 @@ def test_short_gamma_recovered():
 
 
 def test_linear_only_fit_misreads_short_gamma():
-    # The market return has a positive mean, so r and r^2 are correlated and a
-    # linear-only fit finds a "significant" slope on a payoff that ignores direction.
     history = synthetic_history()
     market = history["index_return"]
     pnl = 1.0 - 60.0 * market**2

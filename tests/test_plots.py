@@ -1,5 +1,3 @@
-"""Each figure renders from a synthetic panel, writes a file and closes itself."""
-
 from __future__ import annotations
 
 import matplotlib

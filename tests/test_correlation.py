@@ -31,7 +31,6 @@ def test_two_asset_example():
 
 
 def test_two_assets_exact():
-    # One pair, nothing to average.
     rho_matrix = np.array([[1.0, HAND_RHO], [HAND_RHO, 1.0]])
     exact = index_variance(HAND_VOLS, HAND_WEIGHTS, rho_matrix)
     assert exact == pytest.approx(HAND_INDEX_VARIANCE)
@@ -78,7 +77,6 @@ def test_exact_for_equal_pairwise_correlations():
 
 
 def test_rho_bar_within_pairwise_range():
-    # rho_bar is a positively weighted mean of the rho_ij, so it can't leave their range.
     weights = np.array([0.15, 0.25, 0.35, 0.25])
     vols = np.array([0.20, 0.28, 0.35, 0.50])
 

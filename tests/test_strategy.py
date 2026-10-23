@@ -29,7 +29,6 @@ def history() -> pd.DataFrame:
 
 
 def test_gross_pnl(history):
-    # Spreads (single - index), implied vs realized: 8 vs 8, 10 vs 9, 10 vs 10.
     pnl = gross_pnl(history)
     assert pnl.to_numpy() == pytest.approx([0.0, -1.0, 0.0])
 
@@ -44,7 +43,6 @@ def test_gross_pnl_equals_sum_of_legs(history):
 
 
 def test_correlation_drop_pays():
-    # Single-name vol as implied, index vol 4 points below implied.
     history = pd.DataFrame(
         {
             "avg_single_implied_vol": [0.30],
@@ -60,8 +58,6 @@ def test_correlation_drop_pays():
 
 
 def test_all_vol_falling_loses():
-    # Index/single ratio falls from 0.667 to 0.600, but the long leg loses 10 points
-    # and the short leg only makes 8.
     history = pd.DataFrame(
         {
             "avg_single_implied_vol": [0.30],
@@ -129,7 +125,6 @@ def test_sharpe_std_error():
 
 
 def test_max_drawdown():
-    # Cumulative 5, 3, 1, 4.
     pnl = pd.Series([5.0, -2.0, -2.0, 3.0])
     assert performance(pnl).max_drawdown == pytest.approx(-4.0)
 
@@ -140,7 +135,6 @@ def test_performance_needs_two_months():
 
 
 def test_expanding_signal_no_lookahead():
-    # Truncating the series after t must not change the signal up to t.
     rng = np.random.default_rng(7)
     series = pd.Series(rng.uniform(0.1, 0.9, 200))
 
@@ -151,7 +145,6 @@ def test_expanding_signal_no_lookahead():
 
 
 def test_full_sample_quantile_fails_truncation():
-    # A quiet first stretch then a high one: the full-sample bar is above everything early.
     rng = np.random.default_rng(7)
     quiet = rng.uniform(0.10, 0.30, 60)
     loud = rng.uniform(0.60, 0.90, 140)
@@ -177,7 +170,6 @@ def test_warmup_is_false():
 
 
 def test_spike_fires():
-    # Only possible if the current value is excluded from its own threshold.
     series = pd.Series([0.2] * 50 + [0.95] + [0.2] * 10)
     signal = expanding_quantile_signal(series, min_periods=24)
     assert bool(signal.iloc[50])

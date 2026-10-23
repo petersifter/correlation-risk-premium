@@ -1,12 +1,3 @@
-"""Rebuild the panel, print the README's results and redraw its five figures.
-
-    uv run dispersion-reproduce --username YOU   # rebuild from WRDS
-    uv run dispersion-reproduce --from-cache     # reuse data/processed/
-
-Sections are printed in README order. The cached panel is derived from licensed
-data and is gitignored.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -57,11 +48,6 @@ EVENTS = {
 
 
 def build_panel(username: str) -> pd.DataFrame:
-    """Rebuild the monthly panel from WRDS and cache it.
-
-    CRSP starts the panel in 1990 and OptionMetrics in 1996, so earlier rows
-    have no implied columns.
-    """
     db = connect(username)
     try:
         panel = realized_correlation_history(

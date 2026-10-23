@@ -1,5 +1,3 @@
-"""Figures for the README."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -29,11 +27,6 @@ def _save(fig: plt.Figure, path: str | Path) -> Path:
 
 
 def _separated_peaks(series: pd.Series, count: int, min_years: int = 3) -> pd.Series:
-    """The `count` highest values, at least `min_years` apart.
-
-    The four highest windows are all in 2010-2011, so plain nlargest would put
-    four labels on top of each other.
-    """
     remaining = series.dropna().sort_values(ascending=False)
     chosen: dict[pd.Timestamp, float] = {}
 
@@ -52,7 +45,6 @@ def plot_realized_correlation(
     *,
     annotate: int = 4,
 ) -> Path:
-    """Realized correlation (top) and single-name vs index volatility (bottom)."""
     fig, (top, bottom) = plt.subplots(
         2, 1, figsize=(10, 6.5), sharex=True, height_ratios=[3, 2], gridspec_kw={"hspace": 0.1}
     )
@@ -90,7 +82,6 @@ def plot_realized_correlation(
 
 
 def plot_correlation_premium(history: pd.DataFrame, path: str | Path) -> Path:
-    """Implied and realized correlation (top) and their difference (bottom)."""
     both = history.dropna(subset=["implied_correlation"])
     premium = both["implied_correlation"] - both["realized_correlation"]
 
@@ -119,7 +110,6 @@ def plot_correlation_premium(history: pd.DataFrame, path: str | Path) -> Path:
 
 
 def plot_premium_inference(history: pd.DataFrame, path: str | Path) -> Path:
-    """Mincer-Zarnowitz scatter (left) and decade means with 95% intervals (right)."""
     both = history.dropna(subset=["implied_correlation"])
     premium = both["implied_correlation"] - both["realized_correlation"]
     fit = forecast_regression(both["realized_correlation"], both["implied_correlation"])
@@ -167,7 +157,6 @@ def plot_premium_inference(history: pd.DataFrame, path: str | Path) -> Path:
 
 
 def plot_strategy_pnl(history: pd.DataFrame, path: str | Path) -> Path:
-    """Cumulative gross and net P&L (top) and mean net P&L by five-year period (bottom)."""
     both = history.dropna(subset=["implied_correlation", "basket_half_spread_volpts"])
     gross, cost, net = gross_pnl(both), trading_cost(both), net_pnl(both)
 
@@ -201,7 +190,6 @@ def plot_strategy_pnl(history: pd.DataFrame, path: str | Path) -> Path:
 
 
 def plot_tail_exposure(history: pd.DataFrame, path: str | Path) -> Path:
-    """Net P&L against the market return (left) and the correlation surprise (right)."""
     both = history.dropna(subset=["implied_correlation", "basket_half_spread_volpts"])
     pnl = net_pnl(both)
     market = both["index_return"]

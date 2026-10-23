@@ -97,7 +97,6 @@ def test_known_regression():
 
 
 def test_beta_t_stat_against_one():
-    # Noisy, because with a perfect fit the standard error is rounding noise.
     rng = np.random.default_rng(3)
     implied = pd.Series(np.linspace(0.1, 0.9, 300))
     realized = 0.5 * implied + pd.Series(rng.normal(scale=0.05, size=300))

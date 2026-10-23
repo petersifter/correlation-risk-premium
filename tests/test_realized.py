@@ -80,7 +80,6 @@ def test_basket_return_weighted_sum():
 
 
 def test_basket_identity_exact():
-    # Raw second moments form a covariance matrix, so equation (1) holds to rounding error.
     returns = synthetic_returns().iloc[-WINDOW:]
     weights = equal_weights(returns)
 

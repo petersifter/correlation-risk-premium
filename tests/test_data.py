@@ -1,5 +1,3 @@
-"""Basket construction on synthetic CRSP-shaped frames. The fetch_* functions need WRDS."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -22,7 +20,6 @@ def membership() -> pd.DataFrame:
 
 @pytest.fixture
 def stock_panel() -> pd.DataFrame:
-    # 10004 has a NaN cap on the first day; 10002 has a zero cap on the second.
     return pd.DataFrame(
         {
             "date": pd.to_datetime(
@@ -73,7 +70,6 @@ def test_members_bad_frame():
 
 
 def test_cap_weights(stock_panel, membership):
-    # Caps of 400k, 300k and 200k.
     as_of = pd.Timestamp("2006-01-03")
     permnos = members_on(membership, as_of)
 
