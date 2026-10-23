@@ -99,6 +99,11 @@ class Performance:
     max_drawdown: float
     total: float
 
+    @property
+    def sharpe_std_error(self) -> float:
+        """sqrt((1 + SR^2 / 2) / T), T in years (Lo, 2002)."""
+        return float(np.sqrt((1.0 + 0.5 * self.sharpe**2) / (self.n_months / MONTHS_PER_YEAR)))
+
 
 def performance(pnl: pd.Series) -> Performance:
     """Summary statistics for a monthly P&L series.

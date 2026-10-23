@@ -122,6 +122,12 @@ def test_performance():
     assert stats.sharpe == pytest.approx(0.6 / pnl.std(ddof=1) * np.sqrt(12))
 
 
+def test_sharpe_std_error():
+    stats = performance(pd.Series([1.0, -1.0] * 60 + [0.5]))
+    years = stats.n_months / 12
+    assert stats.sharpe_std_error == pytest.approx(np.sqrt((1 + 0.5 * stats.sharpe**2) / years))
+
+
 def test_max_drawdown():
     # Cumulative 5, 3, 1, 4.
     pnl = pd.Series([5.0, -2.0, -2.0, 3.0])

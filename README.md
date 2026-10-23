@@ -396,7 +396,7 @@ These all make the net P&L look better than it would be.
 
 ```bash
 uv sync
-uv run pytest                                   # 108 tests, no WRDS needed
+uv run pytest                                   # 112 tests, no WRDS needed
 uv run dispersion-reproduce --username YOU      # rebuild from WRDS
 uv run dispersion-reproduce --from-cache        # reuse data/processed/
 ```

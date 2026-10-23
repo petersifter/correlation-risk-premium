@@ -7,6 +7,7 @@ import statsmodels.api as sm
 
 from dispersion.inference import (
     bartlett_lag_default,
+    block_bootstrap_mean,
     forecast_regression,
     newey_west_mean,
     subsample_means,
@@ -132,6 +133,24 @@ def test_subsample_means():
     assert (table["ci_low"] < table["mean"]).all()
     assert (table["mean"] < table["ci_high"]).all()
     assert table.loc["early", "mean"] > table.loc["late", "mean"]
+
+
+def test_block_bootstrap_brackets_the_mean():
+    series = ar1(300, rho=0.5, mean=1.0)
+    low, high = block_bootstrap_mean(series, draws=2_000)
+    assert low < series.mean() < high
+
+
+def test_block_bootstrap_wider_than_iid_under_persistence():
+    series = ar1(400, rho=0.8)
+    iid_low, iid_high = block_bootstrap_mean(series, block=1, draws=4_000)
+    blk_low, blk_high = block_bootstrap_mean(series, block=12, draws=4_000)
+    assert blk_high - blk_low > 1.5 * (iid_high - iid_low)
+
+
+def test_block_bootstrap_is_seeded():
+    series = ar1(100, rho=0.2)
+    assert block_bootstrap_mean(series, seed=3) == block_bootstrap_mean(series, seed=3)
 
 
 def test_too_few_observations():

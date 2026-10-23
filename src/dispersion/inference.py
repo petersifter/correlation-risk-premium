@@ -1,4 +1,4 @@
-"""Newey-West means and HAC regressions.
+"""Newey-West means, HAC regressions and a block bootstrap.
 
 The premium is serially correlated, so standard errors use the Bartlett-weighted
 long-run variance
@@ -22,6 +22,7 @@ __all__ = [
     "HacRegression",
     "MeanEstimate",
     "bartlett_lag_default",
+    "block_bootstrap_mean",
     "forecast_regression",
     "hac_regression",
     "newey_west_mean",
@@ -95,6 +96,36 @@ def newey_west_mean(series: pd.Series, lags: int | None = None) -> MeanEstimate:
         lags=lags,
         naive_std_error=naive,
     )
+
+
+def block_bootstrap_mean(
+    series: pd.Series,
+    *,
+    block: int = 6,
+    draws: int = 10_000,
+    level: float = 0.95,
+    seed: int = 0,
+) -> tuple[float, float]:
+    """Percentile interval for the mean from a moving-block bootstrap.
+
+    Blocks of `block` consecutive observations are resampled with replacement,
+    which keeps short-range serial correlation that an i.i.d. bootstrap would
+    throw away.
+    """
+    values = series.dropna().to_numpy(dtype=float)
+    n = values.size
+    if not 1 <= block < n:
+        raise ValueError(f"block must be in [1, {n - 1}], got {block}")
+
+    rng = np.random.default_rng(seed)
+    n_blocks = -(-n // block)
+    starts = rng.integers(0, n - block + 1, size=(draws, n_blocks))
+    index = (starts[:, :, None] + np.arange(block)).reshape(draws, -1)[:, :n]
+    means = values[index].mean(axis=1)
+
+    tail = (1.0 - level) / 2.0
+    low, high = np.quantile(means, [tail, 1.0 - tail])
+    return float(low), float(high)
 
 
 @dataclass(frozen=True)
