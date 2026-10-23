@@ -131,7 +131,7 @@ The premium is persistent, so standard errors use the Newey-West long-run varian
 
 ```math
 S = \gamma_0 + 2\sum_{j=1}^{L} \left(1 - \frac{j}{L+1}\right)\gamma_j,
-\qquad \operatorname{se}(\bar x) = \sqrt{S/T},
+\qquad \mathrm{se}(\bar x) = \sqrt{S/T},
 \qquad L = \left\lfloor 4\,(T/100)^{2/9} \right\rfloor
 ```
 
